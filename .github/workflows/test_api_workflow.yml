@@ -1,0 +1,20 @@
+name: Test API Connection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: pip install requests -q
+
+      - name: Test login and fetch
+        env:
+          TTC_USERNAME: ${{ secrets.TTC_USERNAME }}
+          TTC_PASSWORD: ${{ secrets.TTC_PASSWORD }}
+        run: python test_api.py
