@@ -1,0 +1,44 @@
+name: Fetch & Update Data
+
+on:
+  schedule:
+    # Chạy mỗi 30 phút (UTC) → 30 phút / lần
+    - cron: "0,30 * * * *"
+  workflow_dispatch:  # Cho phép chạy thủ công
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Cần để git commit + push
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pandas requests openpyxl
+
+      - name: Run fetcher
+        env:
+          DIGIFACTORY_USERNAME: ${{ secrets.DIGIFACTORY_USERNAME }}
+          DIGIFACTORY_PASSWORD: ${{ secrets.DIGIFACTORY_PASSWORD }}
+          BOT_TOKEN:            ${{ secrets.BOT_TOKEN }}
+          ALLOWED_CHAT_ID:      ${{ secrets.ALLOWED_CHAT_ID }}
+        run: python fetcher.py
+
+      - name: Commit & push cache + dashboard
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cache.json dashboard.html
+          # Chỉ commit nếu có thay đổi thực sự
+          git diff --cached --quiet || git commit -m "chore: update cache & dashboard [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git push
