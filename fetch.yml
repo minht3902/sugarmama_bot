@@ -2,7 +2,7 @@ name: Fetch & Update Data
 
 on:
   schedule:
-    - cron: "0 * * * *"   # Mỗi 1 tiếng (giảm từ 30 phút để tiết kiệm free tier)
+    - cron: "0,30 * * * *"   # Mỗi 30 phút
   workflow_dispatch:
     inputs:
       from_date:
