@@ -988,6 +988,18 @@ def main():
 
     print("🏁 Fetcher hoàn tất.")
 
+    # Chờ CDN GitHub invalidate (tối đa ~30s) trước khi báo bot
+    if not is_custom:
+        import time
+        print("⏳ Chờ 30s để CDN cập nhật...")
+        time.sleep(30)
+        tg_notify(
+            f"✅ *Dữ liệu đã được cập nhật!*\n"
+            f"⏰ `{now_vn().strftime('%Y-%m-%d %H:%M:%S')}` (GMT+7)\n"
+            f"📅 Khoảng: `{from_date}` → `{to_date}`\n"
+            f"_Gõ lệnh bất kỳ để xem dữ liệu mới nhất._"
+        )
+
 
 if __name__ == "__main__":
     try:

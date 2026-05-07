@@ -722,6 +722,7 @@ async def cmd_help(update, context):
         "*Quản lý (chỉ admin):*\n"
         "`/add_user <chat_id>`  → thêm người dùng\n"
         "`/remove_user <chat_id>`  → xóa người dùng\n"
+        "`/update`  → cập nhật dữ liệu ngay\n"
         "`/newcache DD/MM/YYYY - DD/MM/YYYY`  → fetch dữ liệu cũ"
     )
     await _send(context, update.effective_chat.id, msg)
@@ -729,22 +730,8 @@ async def cmd_help(update, context):
 
 @_guard
 async def cmd_status(update, context):
-    now = now_vn()
-    uptime_s    = int((now - BOT_START_TIME).total_seconds())
-    uptime_h    = uptime_s // 3600
-    uptime_m    = (uptime_s % 3600) // 60
-    remain_s    = max(0, 72 * 3600 - uptime_s)
-    remain_h    = remain_s // 3600
-    remain_m    = (remain_s % 3600) // 60
-    start_str   = BOT_START_TIME.strftime("%Y-%m-%d %H:%M:%S")
-    deadline_str = (BOT_START_TIME + timedelta(hours=72)).strftime("%Y-%m-%d %H:%M:%S")
-
-    if remain_s <= 0:
-        countdown_line = "⛔ *Đã hết 72h — cần reset ngay trên JustRunMyApp!*"
-    elif remain_s <= 3600:
-        countdown_line = f"🚨 Còn *{remain_h}h {remain_m:02d}m* — Sắp hết, cần reset sớm!"
-    else:
-        countdown_line = f"⏳ Còn *{remain_h}h {remain_m:02d}m* trước khi cần reset"
+    now       = now_vn()
+    is_admin  = _is_admin(update.effective_chat.id)
 
     cache, err = _load_cache_safe()
     cache_line = (
@@ -756,13 +743,12 @@ async def cmd_status(update, context):
     msg = (
         f"*🤖 Bot Status*\n"
         f"🟢 Online — `{now.strftime('%Y-%m-%d %H:%M:%S')}` (GMT+7)\n\n"
-        f"*⏱ JustRunMyApp FreeAppTimer*\n"
-        f"🚀 Khởi động: `{start_str}`\n"
-        f"🔴 Deadline:  `{deadline_str}`\n"
-        f"🏃 Uptime: {uptime_h}h {uptime_m:02d}m\n"
-        f"{countdown_line}\n\n"
         f"{cache_line}"
     )
+
+    if is_admin:
+        msg += "\n\n⚠️ _Remember to reset JustRunMyApp manually!_"
+
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
@@ -1104,6 +1090,38 @@ async def cmd_newcache(update, context):
         await update.message.reply_text(f"❌ Lỗi gọi GitHub API: `{e}`", parse_mode="Markdown")
 
 
+@_guard
+async def cmd_update(update, context):
+    if not _is_admin(update.effective_chat.id):
+        await update.message.reply_text("⛔ Chỉ admin mới dùng được lệnh này.")
+        return
+
+    await update.message.reply_text("⏳ Đang gửi lệnh cập nhật dữ liệu...")
+
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/actions/workflows/fetch.yml/dispatches"
+        r = requests.post(
+            url,
+            headers=_gh_headers(),
+            json={"ref": "main"},
+            timeout=15
+        )
+        if r.status_code == 204:
+            await update.message.reply_text(
+                "✅ Đã gửi lệnh cập nhật!\n"
+                "⏱ Fetcher đang chạy, thường mất 2–3 phút.\n"
+                "Bot sẽ tự thông báo khi hoàn tất.",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ GitHub API trả về HTTP {r.status_code}.\n`{r.text[:300]}`",
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi gọi GitHub API: `{e}`", parse_mode="Markdown")
+
+
 # ========================
 # BUILD APP
 # ========================
@@ -1119,6 +1137,7 @@ def build_bot_app():
     app.add_handler(CommandHandler("add_user",    cmd_add_user))
     app.add_handler(CommandHandler("remove_user", cmd_remove_user))
     app.add_handler(CommandHandler("newcache",    cmd_newcache))
+    app.add_handler(CommandHandler("update",      cmd_update))
 
     for cmd in COMMAND_MAP:
         cmd_name = cmd.lstrip("/")
@@ -1141,6 +1160,7 @@ async def _register_commands(app):
         BotCommand("add_user",    "Thêm người dùng (admin)"),
         BotCommand("remove_user", "Xóa người dùng (admin)"),
         BotCommand("newcache",    "Fetch dữ liệu cũ (admin)"),
+        BotCommand("update",      "Cập nhật dữ liệu ngay (admin)"),
     ]
 
     # Lệnh indicator
