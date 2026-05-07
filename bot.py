@@ -718,7 +718,7 @@ async def cmd_help(update, context):
         "`/lệnh DD/MM-DD/MM`  → khoảng ngày\n"
         "\n`/summary [ngày]`  → tóm tắt tất cả thông số\n"
         "`/dashboard [ngày]`  → tải file Dashboard HTML\n"
-        "`/status`  → trạng thái bot & đếm ngược 72h\n\n"
+        "`/status`  → trạng thái hiện tại của bot\n\n"
         "*Quản lý (chỉ admin):*\n"
         "`/add_user <chat_id>`  → thêm người dùng\n"
         "`/remove_user <chat_id>`  → xóa người dùng\n"
@@ -740,10 +740,19 @@ async def cmd_status(update, context):
         f"📅 Khoảng data: `{cache.get('from_date')}` → `{cache.get('to_date')}`"
     )
 
+    # Liệt kê các file cache cũ
+    old_caches = _list_old_caches()
+    if old_caches:
+        cache_names = "\n".join(f"• `{c['name']}`" for c in old_caches)
+        cache_section = f"\n\n*📦 Dữ liệu sẵn có:*\n{cache_names}"
+    else:
+        cache_section = ""
+
     msg = (
         f"*🤖 Bot Status*\n"
         f"🟢 Online — `{now.strftime('%Y-%m-%d %H:%M:%S')}` (GMT+7)\n\n"
         f"{cache_line}"
+        f"{cache_section}"
     )
 
     if is_admin:
@@ -1154,7 +1163,7 @@ async def _register_commands(app):
     # Lệnh chính — luôn ưu tiên đứng đầu
     commands += [
         BotCommand("help",        "Danh sách lệnh"),
-        BotCommand("status",      "Trạng thái bot & đếm ngược 72h"),
+        BotCommand("status",      "Trạng thái hiện tại của bot"),
         BotCommand("summary",     "Tóm tắt tất cả thông số [ngày]"),
         BotCommand("dashboard",   "Tải file Dashboard HTML [ngày]"),
         BotCommand("add_user",    "Thêm người dùng (admin)"),
