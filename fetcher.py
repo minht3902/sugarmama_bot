@@ -956,14 +956,10 @@ def main():
     from_date, to_date = get_fetch_range()
     print(f"📅 Kỳ báo cáo: {from_date} → {to_date}")
 
-    # Xác định tên file output
+    # Xác định tên file output — luôn dùng tên có ngày
     is_custom = bool(os.environ.get("FETCH_FROM_DATE", "").strip())
-    if is_custom:
-        cache_file     = f"cache_{from_date}_{to_date}.json"
-        dashboard_file = f"dashboard_{from_date}_{to_date}.html"
-    else:
-        cache_file     = CACHE_FILE
-        dashboard_file = DASHBOARD_FILE
+    cache_file     = f"cache_{from_date}_{to_date}.json"
+    dashboard_file = f"dashboard_{from_date}_{to_date}.html"
 
     print("🔐 Login...")
     token = get_token()
@@ -1002,15 +998,23 @@ def main():
     print("🏁 Fetcher hoàn tất.")
 
     # Chờ CDN GitHub invalidate (tối đa ~30s) trước khi báo bot
+    import time
+    print("⏳ Chờ 30s để CDN cập nhật...")
+    time.sleep(30)
     if not is_custom:
-        import time
-        print("⏳ Chờ 30s để CDN cập nhật...")
-        time.sleep(30)
         tg_notify(
             f"✅ *Dữ liệu đã được cập nhật!*\n"
             f"⏰ `{now_vn().strftime('%Y-%m-%d %H:%M:%S')}` (GMT+7)\n"
             f"📅 Khoảng: `{from_date}` → `{to_date}`\n"
             f"_Gõ lệnh bất kỳ để xem dữ liệu mới nhất._"
+        )
+    else:
+        tg_notify(
+            f"✅ *Cache mới đã được tạo!*\n"
+            f"⏰ `{now_vn().strftime('%Y-%m-%d %H:%M:%S')}` (GMT+7)\n"
+            f"📅 Khoảng: `{from_date}` → `{to_date}`\n"
+            f"📦 File: `{cache_file}`\n"
+            f"Dùng /status để kiểm tra cơ sở dữ liệu hiện tại\."
         )
 
 
