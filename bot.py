@@ -35,7 +35,6 @@ GITHUB_CFG_REPO = "sugarmama_config"
 GITHUB_API      = "https://api.github.com"
 
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/main"
-CACHE_URL       = f"{GITHUB_RAW_BASE}/cache.json"
 DASHBOARD_URL   = f"{GITHUB_RAW_BASE}/dashboard.html"
 
 BOT_START_TIME  = now_vn()  # Ghi nhận lúc bot khởi động
@@ -304,8 +303,23 @@ def _fetch_json(url: str):
         return None, str(e)
 
 def _load_cache_safe():
-    """Tải cache.json chính, trả về (cache_dict, error_str)."""
-    return _fetch_json(CACHE_URL)
+    """Tải file cache mới nhất (cache_YYYY-MM-DD_YYYY-MM-DD.json), trả về (cache_dict, error_str)."""
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/contents/"
+        r = requests.get(url, headers=_gh_headers(), timeout=15)
+        r.raise_for_status()
+        import re as _re
+        files = [
+            f["name"] for f in r.json()
+            if _re.match(r'^cache_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.json$', f["name"])
+        ]
+        if not files:
+            return None, "Không tìm thấy file cache nào trong repo."
+        latest = sorted(files, key=lambda x: x.split('_')[2].replace('.json', ''))[-1]  # sort theo to_date
+        raw_url = f"{GITHUB_RAW_BASE}/{latest}"
+        return _fetch_json(raw_url)
+    except Exception as e:
+        return None, str(e)
 
 def _list_old_caches() -> list[dict]:
     """
@@ -740,10 +754,19 @@ async def cmd_status(update, context):
         f"📅 Khoảng data: `{cache.get('from_date')}` → `{cache.get('to_date')}`"
     )
 
-    # Liệt kê các file cache cũ
-    old_caches = _list_old_caches()
-    if old_caches:
-        cache_names = "\n".join(f"• `{c['name']}`" for c in old_caches)
+    # Liệt kê tất cả file cache*.json trong repo
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/contents/"
+        r = requests.get(url, headers=_gh_headers(), timeout=15)
+        r.raise_for_status()
+        all_files = [f["name"] for f in r.json()
+                     if f["name"].startswith("cache") and f["name"].endswith(".json")]
+        all_files.sort()
+    except Exception:
+        all_files = []
+
+    if all_files:
+        cache_names = "\n".join(f"• `{n}`" for n in all_files)
         cache_section = f"\n\n*📦 Dữ liệu sẵn có:*\n{cache_names}"
     else:
         cache_section = ""
