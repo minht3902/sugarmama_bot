@@ -192,8 +192,13 @@ def transform(df):
 
     def fix_datetime(row):
         date_str = row["inputDate"]
-        time_str = row["inputHour"]
-        hour, minute = map(int, time_str.split(":"))
+        time_str = str(row["inputHour"]).strip()
+        if not time_str or ":" not in time_str:
+            return pd.NaT
+        parts = time_str.split(":")
+        if len(parts) < 2 or parts[0] == "" or parts[1] == "":
+            return pd.NaT
+        hour, minute = int(parts[0]), int(parts[1])
         dt = datetime.strptime(date_str, "%Y/%m/%d")
         if hour >= 24:
             dt = dt + pd.Timedelta(days=1)
@@ -201,6 +206,10 @@ def transform(df):
         return dt.replace(hour=hour, minute=minute)
 
     df["datetime"] = df.apply(fix_datetime, axis=1)
+    nat_count = df["datetime"].isna().sum()
+    if nat_count:
+        print(f"⚠️ Bỏ qua {nat_count} row có inputHour rỗng/không hợp lệ")
+    df = df.dropna(subset=["datetime"]).reset_index(drop=True)
     df["inputValue"] = pd.to_numeric(df["inputValue"], errors="coerce")
 
     df.rename(columns={
