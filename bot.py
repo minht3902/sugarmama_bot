@@ -1166,16 +1166,15 @@ import asyncio
 async def _main_async():
     print("🤖 Telegram Bot đang khởi động...")
     bot_app = build_bot_app()
-    # Đăng ký commands ngay khi khởi động — không delay
-    async with bot_app:
-        await _register_commands(bot_app)
-        await bot_app.initialize()
-        await bot_app.start()
-        await bot_app.updater.start_polling(drop_pending_updates=True)
-        print("✅ Bot đang chạy...")
-        # Chạy mãi cho đến khi bị dừng
-        await bot_app.updater.idle()
-        await bot_app.stop()
+
+    await bot_app.initialize()
+    await _register_commands(bot_app)
+    await bot_app.start()
+    await bot_app.updater.start_polling(drop_pending_updates=True)
+    print("✅ Bot đang chạy...")
+    await bot_app.updater.idle()
+    await bot_app.stop()
+    await bot_app.shutdown()
 
 if __name__ == "__main__":
     asyncio.run(_main_async())
