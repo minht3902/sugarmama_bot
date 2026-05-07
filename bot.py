@@ -27,12 +27,68 @@ def now_vn():
 # ========================
 BOT_TOKEN       = os.environ["BOT_TOKEN"]
 ALLOWED_CHAT_ID = int(os.environ["ALLOWED_CHAT_ID"])
+GITHUB_PAT      = os.environ.get("PAT", "")
 
-BOT_START_TIME = now_vn()  # Ghi nhận lúc bot khởi động
+GITHUB_OWNER    = "minht3902"
+GITHUB_BOT_REPO = "sugarmama_bot"
+GITHUB_CFG_REPO = "sugarmama_config"
+GITHUB_API      = "https://api.github.com"
 
-GITHUB_RAW_BASE = "https://raw.githubusercontent.com/minht3902/sugarmama_bot/main"
+GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/main"
 CACHE_URL       = f"{GITHUB_RAW_BASE}/cache.json"
 DASHBOARD_URL   = f"{GITHUB_RAW_BASE}/dashboard.html"
+
+BOT_START_TIME  = now_vn()  # Ghi nhận lúc bot khởi động
+
+# ========================
+# USERS (đọc từ sugarmama_config/users.json)
+# ========================
+_ALLOWED_USERS: list[int] = []
+
+def _gh_headers():
+    return {"Authorization": f"token {GITHUB_PAT}", "Accept": "application/vnd.github+json"}
+
+def load_allowed_users() -> list[int]:
+    """Đọc danh sách user từ sugarmama_config/users.json qua GitHub API."""
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_CFG_REPO}/contents/users.json"
+        r = requests.get(url, headers=_gh_headers(), timeout=15)
+        r.raise_for_status()
+        import base64
+        content = base64.b64decode(r.json()["content"]).decode("utf-8")
+        users = json.loads(content)
+        return [int(u) for u in users]
+    except Exception as e:
+        print(f"[LOAD USERS ERROR] {e}")
+        return [ALLOWED_CHAT_ID]
+
+def save_allowed_users(users: list[int]) -> bool:
+    """Ghi danh sách user lên sugarmama_config/users.json qua GitHub API."""
+    try:
+        import base64
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_CFG_REPO}/contents/users.json"
+        # Lấy SHA hiện tại
+        r = requests.get(url, headers=_gh_headers(), timeout=15)
+        r.raise_for_status()
+        sha = r.json()["sha"]
+        # Ghi nội dung mới
+        content = json.dumps(users, ensure_ascii=False)
+        encoded = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+        payload = {
+            "message": f"chore: update users [{now_vn().strftime('%Y-%m-%d %H:%M')}]",
+            "content": encoded,
+            "sha": sha
+        }
+        r2 = requests.put(url, headers=_gh_headers(), json=payload, timeout=15)
+        r2.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"[SAVE USERS ERROR] {e}")
+        return False
+
+# Load lần đầu khi khởi động
+_ALLOWED_USERS = load_allowed_users()
+print(f"✅ Loaded {len(_ALLOWED_USERS)} allowed users: {_ALLOWED_USERS}")
 
 # ========================
 # NGƯỠNG CHUẨN
@@ -303,7 +359,6 @@ def _parse_date_arg(arg):
                 continue
         raise ValueError(f"Không nhận ra định dạng ngày: '{s}'. Dùng DD/MM hoặc DD/MM/YYYY.")
 
-    # Hỗ trợ cả "01/04-10/04" và "01/04 - 10/04"
     import re as _re
     range_match = _re.match(r'^(.+?)\s*-\s*(.+)$', arg)
     if range_match:
@@ -507,7 +562,8 @@ async def _send_error(context, chat_id, err_msg):
 def _guard(func):
     """Decorator: chặn chat_id không được phép, bắt lỗi và tự báo cáo."""
     async def wrapper(update, context):
-        if update.effective_chat.id != ALLOWED_CHAT_ID:
+        uid = update.effective_chat.id
+        if uid not in _ALLOWED_USERS and uid != ALLOWED_CHAT_ID:
             await update.message.reply_text("⛔ Không có quyền truy cập.")
             return
         try:
@@ -538,7 +594,11 @@ async def cmd_help(update, context):
         "`/lệnh DD/MM-DD/MM`  → khoảng ngày\n"
         "\n`/summary [ngày]`  → tóm tắt tất cả thông số\n"
         "`/dashboard [ngày]`  → tải file Dashboard HTML\n"
-        "`/status`  → trạng thái bot & lần cập nhật cuối"
+        "`/status`  → trạng thái bot & đếm ngược 72h\n\n"
+        "*Quản lý (chỉ admin):*\n"
+        "`/add_user <chat_id>`  → thêm người dùng\n"
+        "`/remove_user <chat_id>`  → xóa người dùng\n"
+        "`/newcache DD/MM/YYYY - DD/MM/YYYY`  → fetch dữ liệu cũ"
     )
     await _send(context, update.effective_chat.id, msg)
 
@@ -546,42 +606,32 @@ async def cmd_help(update, context):
 @_guard
 async def cmd_status(update, context):
     now = now_vn()
-    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    uptime_s    = int((now - BOT_START_TIME).total_seconds())
+    uptime_h    = uptime_s // 3600
+    uptime_m    = (uptime_s % 3600) // 60
+    remain_s    = max(0, 72 * 3600 - uptime_s)
+    remain_h    = remain_s // 3600
+    remain_m    = (remain_s % 3600) // 60
+    start_str   = BOT_START_TIME.strftime("%Y-%m-%d %H:%M:%S")
+    deadline_str = (BOT_START_TIME + timedelta(hours=72)).strftime("%Y-%m-%d %H:%M:%S")
 
-    # Tính uptime và countdown 72h JustRunMyApp
-    uptime_delta   = now - BOT_START_TIME
-    uptime_total_s = int(uptime_delta.total_seconds())
-    uptime_h       = uptime_total_s // 3600
-    uptime_m       = (uptime_total_s % 3600) // 60
-
-    limit_hours    = 72
-    remaining_s    = max(0, limit_hours * 3600 - uptime_total_s)
-    remain_h       = remaining_s // 3600
-    remain_m       = (remaining_s % 3600) // 60
-
-    start_str      = BOT_START_TIME.strftime("%Y-%m-%d %H:%M:%S")
-    deadline_str   = (BOT_START_TIME + timedelta(hours=limit_hours)).strftime("%Y-%m-%d %H:%M:%S")
-
-    if remaining_s <= 0:
+    if remain_s <= 0:
         countdown_line = "⛔ *Đã hết 72h — cần reset ngay trên JustRunMyApp!*"
-    elif remaining_s <= 3600:
+    elif remain_s <= 3600:
         countdown_line = f"🚨 Còn *{remain_h}h {remain_m:02d}m* — Sắp hết, cần reset sớm!"
     else:
         countdown_line = f"⏳ Còn *{remain_h}h {remain_m:02d}m* trước khi cần reset"
 
-    # Thông tin cache
     cache, err = _load_cache_safe()
-    if err:
-        cache_line = f"⚠️ Cache: Không đọc được (`{err}`)"
-    else:
-        cache_line = (
-            f"🔄 Dữ liệu cập nhật lúc: `{cache.get('updated_at', 'N/A')}`\n"
-            f"📅 Khoảng dữ liệu: `{cache.get('from_date')}` → `{cache.get('to_date')}`"
-        )
+    cache_line = (
+        f"⚠️ Cache lỗi: `{err}`" if err else
+        f"🔄 Data cập nhật: `{cache.get('updated_at', 'N/A')}`\n"
+        f"📅 Khoảng data: `{cache.get('from_date')}` → `{cache.get('to_date')}`"
+    )
 
     msg = (
         f"*🤖 Bot Status*\n"
-        f"🟢 Online — `{now_str}` (GMT+7)\n\n"
+        f"🟢 Online — `{now.strftime('%Y-%m-%d %H:%M:%S')}` (GMT+7)\n\n"
         f"*⏱ JustRunMyApp FreeAppTimer*\n"
         f"🚀 Khởi động: `{start_str}`\n"
         f"🔴 Deadline:  `{deadline_str}`\n"
@@ -780,6 +830,138 @@ async def cmd_dashboard(update, context):
     )
 
 
+def _is_admin(uid):
+    return uid == ALLOWED_CHAT_ID
+
+@_guard
+async def cmd_add_user(update, context):
+    if not _is_admin(update.effective_chat.id):
+        await update.message.reply_text("⛔ Chỉ admin mới dùng được lệnh này.")
+        return
+    parts = update.message.text.strip().split(None, 1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "❌ Cú pháp: `/add_user <chat_id>`\n"
+            "Ví dụ: `/add_user 123456789`",
+            parse_mode="Markdown"
+        )
+        return
+    try:
+        new_id = int(parts[1].strip())
+    except ValueError:
+        await update.message.reply_text("❌ Chat ID phải là số nguyên.")
+        return
+
+    if new_id in _ALLOWED_USERS:
+        await update.message.reply_text(f"ℹ️ User `{new_id}` đã có trong danh sách.", parse_mode="Markdown")
+        return
+
+    _ALLOWED_USERS.append(new_id)
+    ok = save_allowed_users(_ALLOWED_USERS)
+    if ok:
+        await update.message.reply_text(
+            f"✅ Đã thêm user `{new_id}`.\n"
+            f"👥 Danh sách hiện tại: {len(_ALLOWED_USERS)} user.",
+            parse_mode="Markdown"
+        )
+    else:
+        _ALLOWED_USERS.remove(new_id)
+        await update.message.reply_text("❌ Lỗi lưu danh sách user lên GitHub. Thử lại sau.")
+
+
+@_guard
+async def cmd_remove_user(update, context):
+    if not _is_admin(update.effective_chat.id):
+        await update.message.reply_text("⛔ Chỉ admin mới dùng được lệnh này.")
+        return
+    parts = update.message.text.strip().split(None, 1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "❌ Cú pháp: `/remove_user <chat_id>`\n"
+            "Ví dụ: `/remove_user 123456789`",
+            parse_mode="Markdown"
+        )
+        return
+    try:
+        rm_id = int(parts[1].strip())
+    except ValueError:
+        await update.message.reply_text("❌ Chat ID phải là số nguyên.")
+        return
+
+    if rm_id == ALLOWED_CHAT_ID:
+        await update.message.reply_text("⛔ Không thể xóa admin chính.")
+        return
+    if rm_id not in _ALLOWED_USERS:
+        await update.message.reply_text(f"ℹ️ User `{rm_id}` không có trong danh sách.", parse_mode="Markdown")
+        return
+
+    _ALLOWED_USERS.remove(rm_id)
+    ok = save_allowed_users(_ALLOWED_USERS)
+    if ok:
+        await update.message.reply_text(
+            f"✅ Đã xóa user `{rm_id}`.\n"
+            f"👥 Còn lại: {len(_ALLOWED_USERS)} user.",
+            parse_mode="Markdown"
+        )
+    else:
+        _ALLOWED_USERS.append(rm_id)
+        await update.message.reply_text("❌ Lỗi lưu danh sách user lên GitHub. Thử lại sau.")
+
+
+@_guard
+async def cmd_newcache(update, context):
+    if not _is_admin(update.effective_chat.id):
+        await update.message.reply_text("⛔ Chỉ admin mới dùng được lệnh này.")
+        return
+    parts = update.message.text.strip().split(None, 1)
+    if len(parts) < 2:
+        await update.message.reply_text(
+            "❌ Cú pháp: `/newcache DD/MM/YYYY - DD/MM/YYYY`\n"
+            "Ví dụ: `/newcache 01/12/2024 - 31/12/2024`",
+            parse_mode="Markdown"
+        )
+        return
+    try:
+        from_d, to_d = _parse_date_arg(parts[1])
+    except ValueError as e:
+        await update.message.reply_text(f"❌ {e}")
+        return
+    if from_d is None or to_d is None:
+        await update.message.reply_text("❌ Vui lòng nhập khoảng ngày cụ thể.")
+        return
+
+    await update.message.reply_text(
+        f"⏳ Đang trigger GitHub Actions fetch dữ liệu `{from_d}` → `{to_d}`...",
+        parse_mode="Markdown"
+    )
+
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/actions/workflows/fetch.yml/dispatches"
+        payload = {
+            "ref": "main",
+            "inputs": {
+                "from_date": from_d,
+                "to_date": to_d
+            }
+        }
+        r = requests.post(url, headers=_gh_headers(), json=payload, timeout=15)
+        if r.status_code == 204:
+            await update.message.reply_text(
+                f"✅ Đã gửi lệnh fetch!\n"
+                f"📅 Khoảng: `{from_d}` → `{to_d}`\n"
+                f"⏱ GitHub Actions sẽ chạy trong vài giây.\n"
+                f"Dùng `/status` để kiểm tra khi hoàn tất.",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ GitHub API trả về HTTP {r.status_code}.\n`{r.text[:300]}`",
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi gọi GitHub API: `{e}`", parse_mode="Markdown")
+
+
 # ========================
 # BUILD APP
 # ========================
@@ -788,10 +970,13 @@ def build_bot_app():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("help",      cmd_help))
-    app.add_handler(CommandHandler("status",    cmd_status))
-    app.add_handler(CommandHandler("summary",   cmd_summary))
-    app.add_handler(CommandHandler("dashboard", cmd_dashboard))
+    app.add_handler(CommandHandler("help",        cmd_help))
+    app.add_handler(CommandHandler("status",      cmd_status))
+    app.add_handler(CommandHandler("summary",     cmd_summary))
+    app.add_handler(CommandHandler("dashboard",   cmd_dashboard))
+    app.add_handler(CommandHandler("add_user",    cmd_add_user))
+    app.add_handler(CommandHandler("remove_user", cmd_remove_user))
+    app.add_handler(CommandHandler("newcache",    cmd_newcache))
 
     for cmd in COMMAND_MAP:
         cmd_name = cmd.lstrip("/")

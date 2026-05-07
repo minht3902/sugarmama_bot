@@ -1,0 +1,53 @@
+name: Fetch & Update Data
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # Mỗi 1 tiếng (giảm từ 30 phút để tiết kiệm free tier)
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: "Từ ngày (YYYY-MM-DD) — để trống = chạy mặc định từ đầu vụ"
+        required: false
+        default: ""
+      to_date:
+        description: "Đến ngày (YYYY-MM-DD) — để trống = chạy mặc định đến hết tháng"
+        required: false
+        default: ""
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pandas requests openpyxl
+
+      - name: Run fetcher
+        env:
+          DIGIFACTORY_USERNAME: ${{ secrets.DIGIFACTORY_USERNAME }}
+          DIGIFACTORY_PASSWORD: ${{ secrets.DIGIFACTORY_PASSWORD }}
+          BOT_TOKEN:            ${{ secrets.BOT_TOKEN }}
+          ALLOWED_CHAT_ID:      ${{ secrets.ALLOWED_CHAT_ID }}
+          FETCH_FROM_DATE:      ${{ github.event.inputs.from_date }}
+          FETCH_TO_DATE:        ${{ github.event.inputs.to_date }}
+        run: python fetcher.py
+
+      - name: Commit & push cache + dashboard
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cache.json dashboard.html
+          git diff --cached --quiet || git commit -m "chore: update cache & dashboard [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          git push

@@ -140,26 +140,23 @@ def get_token():
 # ========================
 # DATE
 # ========================
-def get_current_month_range():
-    today = now_vn().replace(tzinfo=None)
-    first_day = today.replace(day=1)
-    last_day = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-    return first_day.strftime("%Y-%m-%d"), last_day.strftime("%Y-%m-%d")
+SEASON_START = "2025-12-01"  # Ngày bắt đầu vụ sản xuất 25-26
 
 def get_fetch_range():
     """
-    Trả về (from_date, to_date) để fetch đủ dữ liệu cho 7 ngày mới nhất.
-    Nếu đang trong 6 ngày đầu tháng, lùi thêm sang tháng trước để đủ 7 ngày.
+    Trả về (from_date, to_date).
+    - Nếu workflow_dispatch truyền vào from_date/to_date → dùng đó (cho /newcache).
+    - Mặc định: từ đầu vụ (SEASON_START) đến cuối tháng hiện tại.
     """
-    today = now_vn().replace(tzinfo=None)
+    from_env = os.environ.get("FETCH_FROM_DATE", "").strip()
+    to_env   = os.environ.get("FETCH_TO_DATE", "").strip()
+    if from_env and to_env:
+        print(f"📥 Dùng khoảng ngày từ workflow input: {from_env} → {to_env}")
+        return from_env, to_env
+
+    today    = now_vn().replace(tzinfo=None)
     last_day = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-    if today.day <= 6:
-        # Lấy từ 6 ngày trước hôm nay (có thể sang tháng trước)
-        start = today - timedelta(days=6)
-        return start.strftime("%Y-%m-%d"), last_day.strftime("%Y-%m-%d")
-    else:
-        first_day = today.replace(day=1)
-        return first_day.strftime("%Y-%m-%d"), last_day.strftime("%Y-%m-%d")
+    return SEASON_START, last_day.strftime("%Y-%m-%d")
 
 # ========================
 # FETCH
