@@ -1172,9 +1172,10 @@ async def _main_async():
     await bot_app.start()
     await bot_app.updater.start_polling(drop_pending_updates=True)
     print("✅ Bot đang chạy...")
-    await bot_app.updater.idle()
-    await bot_app.stop()
-    await bot_app.shutdown()
+
+    # Giữ bot chạy mãi (tương thích python-telegram-bot v20+)
+    stop_event = asyncio.Event()
+    await stop_event.wait()
 
 if __name__ == "__main__":
     asyncio.run(_main_async())
