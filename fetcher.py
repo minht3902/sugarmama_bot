@@ -223,7 +223,11 @@ def transform(df):
         keep=False
     )
     if dup.any():
-        raise Exception(f"Phát hiện {dup.sum()} dòng duplicate trong dữ liệu")
+        print(f"⚠️ Phát hiện {dup.sum()} dòng duplicate — giữ lại dòng đầu tiên")
+        df = df.drop_duplicates(
+            subset=["datetime", "process", "sub_process", "indicator"],
+            keep="first"
+        ).reset_index(drop=True)
 
     return df
 
