@@ -288,25 +288,149 @@ NAU_MAP_KEYS = {
 }
 
 # ========================
-# CACHE
+# CACHE — Multi-cache support
 # ========================
-def _load_cache():
-    """Fetch cache.json từ GitHub raw URL."""
-    try:
-        r = requests.get(CACHE_URL, timeout=20)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        return None, str(e)
+# cache.json         : dữ liệu vụ hiện tại (fetcher tự động)
+# cache_FROM_TO.json : dữ liệu cũ do /newcache tạo
+#   ví dụ: cache_2024-12-01_2024-12-31.json
 
-def _load_cache_safe():
-    """Trả về (cache_dict, error_str). error_str=None nếu OK."""
+def _fetch_json(url: str):
+    """Tải JSON từ URL, trả về (data, error)."""
     try:
-        r = requests.get(CACHE_URL, timeout=20)
+        r = requests.get(url, timeout=20)
         r.raise_for_status()
         return r.json(), None
     except Exception as e:
         return None, str(e)
+
+def _load_cache_safe():
+    """Tải cache.json chính, trả về (cache_dict, error_str)."""
+    return _fetch_json(CACHE_URL)
+
+def _list_old_caches() -> list[dict]:
+    """
+    Liệt kê các file cache_*.json trong repo qua GitHub API.
+    Trả về list[{"name": str, "from": str, "to": str, "url": str}]
+    """
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/contents/"
+        r = requests.get(url, headers=_gh_headers(), timeout=15)
+        r.raise_for_status()
+        files = r.json()
+        result = []
+        import re as _re
+        for f in files:
+            m = _re.match(r'^cache_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.json$', f["name"])
+            if m:
+                result.append({
+                    "name": f["name"],
+                    "from": m.group(1),
+                    "to":   m.group(2),
+                    "url":  f"{GITHUB_RAW_BASE}/{f['name']}"
+                })
+        return sorted(result, key=lambda x: x["from"])
+    except Exception as e:
+        print(f"[LIST CACHES ERROR] {e}")
+        return []
+
+def _find_cache_for_range(from_d: str, to_d: str):
+    """
+    Tìm cache phù hợp cho khoảng [from_d, to_d].
+    Trả về (cache_dict, source_label, error_str).
+    Logic:
+      1. Thử cache.json chính trước
+      2. Nếu khoảng nằm ngoài cache chính → tìm cache_*.json
+      3. Nếu khoảng trải dài qua nhiều cache → merge
+      4. Nếu không đủ dữ liệu → trả thông báo rõ ràng
+    """
+    # Bước 1: load cache chính
+    main_cache, err = _load_cache_safe()
+
+    def _range_covered(cache, fd, td):
+        """Kiểm tra cache có chứa dữ liệu cho khoảng [fd, td] không."""
+        if not cache:
+            return False
+        cf = cache.get("from_date", "9999-99-99")
+        ct = cache.get("to_date",   "0000-00-00")
+        return cf <= fd and td <= ct
+
+    # Nếu cache chính đủ → dùng luôn
+    if main_cache and _range_covered(main_cache, from_d, to_d):
+        return main_cache, "cache hiện tại", None
+
+    # Bước 2: tìm trong cache cũ
+    old_caches = _list_old_caches()
+
+    # Bước 3: gom tất cả cache có overlap với [from_d, to_d]
+    candidates = []
+    if main_cache and not err:
+        cf = main_cache.get("from_date", "9999")
+        ct = main_cache.get("to_date",   "0000")
+        if cf <= to_d and ct >= from_d:  # có overlap
+            candidates.append((cf, ct, main_cache, "cache hiện tại"))
+
+    for oc in old_caches:
+        if oc["from"] <= to_d and oc["to"] >= from_d:  # có overlap
+            data, e = _fetch_json(oc["url"])
+            if data:
+                candidates.append((oc["from"], oc["to"], data, oc["name"]))
+
+    if not candidates:
+        # Tìm xem có cache nào gần nhất không để gợi ý
+        all_ranges = [(oc["from"], oc["to"]) for oc in old_caches]
+        if main_cache:
+            all_ranges.append((main_cache.get("from_date","?"), main_cache.get("to_date","?")))
+        hint = ""
+        if all_ranges:
+            hint = "\n📦 Cache hiện có:\n" + "\n".join(f"  • `{f}` → `{t}`" for f, t in sorted(all_ranges))
+        return None, None, (
+            f"⚠️ Chưa có dữ liệu cho khoảng `{_fmt_date(from_d)}` → `{_fmt_date(to_d)}`.\n"
+            f"Dùng `/newcache {_fmt_date(from_d)} - {_fmt_date(to_d)}` để tạo cache rồi gọi lại lệnh."
+            + hint
+        )
+
+    # Bước 4: nếu chỉ 1 candidate → dùng luôn
+    if len(candidates) == 1:
+        _, _, data, label = candidates[0]
+        return data, label, None
+
+    # Bước 5: merge raw data từ nhiều cache
+    merged_raw = {}
+    labels = []
+    for _, _, data, label in sorted(candidates, key=lambda x: x[0]):
+        labels.append(label)
+        raw = data.get("raw", {})
+        for group in ("mia", "mat", "hoa", "nau"):
+            if group not in raw:
+                continue
+            if group not in merged_raw:
+                merged_raw[group] = {}
+            grp = raw[group]
+            if group in ("mia", "mat"):
+                for key, series in grp.items():
+                    if key not in merged_raw[group]:
+                        merged_raw[group][key] = []
+                    existing_ts = {pt["t"] for pt in merged_raw[group][key]}
+                    merged_raw[group][key] += [pt for pt in series if pt["t"] not in existing_ts]
+                    merged_raw[group][key].sort(key=lambda x: x["t"])
+            else:  # hoa, nau — nested dict
+                for section, params in grp.items():
+                    if section not in merged_raw[group]:
+                        merged_raw[group][section] = {}
+                    for param, series in params.items():
+                        if param not in merged_raw[group][section]:
+                            merged_raw[group][section][param] = []
+                        existing_ts = {pt["t"] for pt in merged_raw[group][section][param]}
+                        merged_raw[group][section][param] += [pt for pt in series if pt["t"] not in existing_ts]
+                        merged_raw[group][section][param].sort(key=lambda x: x["t"])
+
+    merged_cache = {
+        "from_date":  min(c[0] for c in candidates),
+        "to_date":    max(c[1] for c in candidates),
+        "updated_at": now_vn().strftime("%Y-%m-%d %H:%M:%S"),
+        "raw":        merged_raw,
+    }
+    return merged_cache, f"merged ({', '.join(labels)})", None
 
 # ========================
 # SERIES HELPERS
@@ -649,13 +773,29 @@ async def cmd_indicator(update, context):
     cmd   = parts[0].lower().split("@")[0]
     arg   = parts[1] if len(parts) > 1 else ""
 
-    cache, err = _load_cache_safe()
-    if err:
-        await update.message.reply_text(
-            f"⚠️ Không lấy được dữ liệu từ GitHub.\nLỗi: `{err}`",
-            parse_mode="Markdown"
-        )
+    # Parse ngày trước để biết cần cache nào
+    try:
+        from_d, to_d = _parse_date_arg(arg)
+    except ValueError as e:
+        await update.message.reply_text(f"❌ {e}")
         return
+
+    # Xác định khoảng cần tìm
+    if from_d is None:
+        # Chưa biết ngày → load cache chính trước, xác định 7 ngày mới nhất
+        cache, err = _load_cache_safe()
+        if err:
+            await update.message.reply_text(
+                f"⚠️ Không lấy được dữ liệu từ GitHub.\nLỗi: `{err}`",
+                parse_mode="Markdown"
+            )
+            return
+        cache_label = "cache hiện tại"
+    else:
+        cache, cache_label, err = _find_cache_for_range(from_d, to_d)
+        if err:
+            await update.message.reply_text(err, parse_mode="Markdown")
+            return
 
     series, display = _get_series_from_cache(cache, cmd)
     if series is None:
@@ -697,22 +837,28 @@ async def cmd_summary(update, context):
     parts = text.split(None, 1)
     arg   = parts[1] if len(parts) > 1 else ""
 
-    cache, err = _load_cache_safe()
-    if err:
-        await update.message.reply_text(
-            f"⚠️ Không lấy được dữ liệu từ GitHub.\nLỗi: `{err}`",
-            parse_mode="Markdown"
-        )
-        return
-
-    raw        = cache.get("raw", {})
-    updated_at = cache.get("updated_at", "?")
-
     try:
         from_d, to_d = _parse_date_arg(arg)
     except ValueError as e:
         await update.message.reply_text(f"❌ {e}")
         return
+
+    if from_d is None:
+        cache, err = _load_cache_safe()
+        if err:
+            await update.message.reply_text(
+                f"⚠️ Không lấy được dữ liệu từ GitHub.\nLỗi: `{err}`",
+                parse_mode="Markdown"
+            )
+            return
+    else:
+        cache, _, err = _find_cache_for_range(from_d, to_d)
+        if err:
+            await update.message.reply_text(err, parse_mode="Markdown")
+            return
+
+    raw        = cache.get("raw", {})
+    updated_at = cache.get("updated_at", "?")
 
     if from_d is None:
         all_series = list(raw.get("mia", {}).values())
@@ -736,16 +882,12 @@ async def cmd_summary(update, context):
     )
 
     messages = [header]
-
     mia_items = MIA_MAP_LABELS
     messages.append(_format_summary_section(raw, "🌿 MÍA - NƯỚC MÍA", "mia", mia_items, from_d, to_d))
-
     mat_items = MAT_MAP_LABELS
     messages.append(_format_summary_section(raw, "🍯 MẬT RỈ - BÙN THÔ", "mat", mat_items, from_d, to_d))
-
     hoa_items = [(sec, key) for sec, keys in HOA_MAP_KEYS.items() for key in keys]
     messages.append(_format_summary_section(raw, "⚗️ HÓA CHẾ THÔ", "hoa", hoa_items, from_d, to_d))
-
     nau_items = [(sec, param) for sec, params in NAU_MAP_KEYS.items() for param in params]
     messages.append(_format_summary_section(raw, "🏭 NẤU ĐƯỜNG - LY TÂM THÔ", "nau", nau_items, from_d, to_d))
 
@@ -985,10 +1127,55 @@ def build_bot_app():
     return app
 
 
+async def _register_commands(app):
+    """Đăng ký toàn bộ lệnh với Telegram để hiện gợi ý khi user gõ /"""
+    from telegram import BotCommand
+    commands = []
+
+    # Lệnh chính — luôn ưu tiên đứng đầu
+    commands += [
+        BotCommand("help",        "Danh sách lệnh"),
+        BotCommand("status",      "Trạng thái bot & đếm ngược 72h"),
+        BotCommand("summary",     "Tóm tắt tất cả thông số [ngày]"),
+        BotCommand("dashboard",   "Tải file Dashboard HTML [ngày]"),
+        BotCommand("add_user",    "Thêm người dùng (admin)"),
+        BotCommand("remove_user", "Xóa người dùng (admin)"),
+        BotCommand("newcache",    "Fetch dữ liệu cũ (admin)"),
+    ]
+
+    # Lệnh indicator
+    for cmd, mapping in sorted(COMMAND_MAP.items()):
+        cmd_name = cmd.lstrip("/")
+        desc = mapping[3] if len(mapping) == 4 else mapping[2]
+        commands.append(BotCommand(cmd_name[:32], desc[:256]))
+
+    # Telegram giới hạn 100 lệnh
+    if len(commands) > 100:
+        print(f"⚠️ {len(commands)} lệnh, cắt còn 100...")
+        commands = commands[:100]
+
+    await app.bot.set_my_commands(commands)
+    print(f"✅ Đã đăng ký {len(commands)} lệnh với Telegram")
+
+
 # ========================
 # MAIN
 # ========================
-if __name__ == "__main__":
+import asyncio
+
+async def _main_async():
     print("🤖 Telegram Bot đang khởi động...")
     bot_app = build_bot_app()
-    bot_app.run_polling(drop_pending_updates=True)
+    # Đăng ký commands ngay khi khởi động — không delay
+    async with bot_app:
+        await _register_commands(bot_app)
+        await bot_app.initialize()
+        await bot_app.start()
+        await bot_app.updater.start_polling(drop_pending_updates=True)
+        print("✅ Bot đang chạy...")
+        # Chạy mãi cho đến khi bị dừng
+        await bot_app.updater.idle()
+        await bot_app.stop()
+
+if __name__ == "__main__":
+    asyncio.run(_main_async())

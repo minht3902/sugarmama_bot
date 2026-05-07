@@ -943,6 +943,15 @@ def main():
     from_date, to_date = get_fetch_range()
     print(f"📅 Kỳ báo cáo: {from_date} → {to_date}")
 
+    # Xác định tên file output
+    is_custom = bool(os.environ.get("FETCH_FROM_DATE", "").strip())
+    if is_custom:
+        cache_file     = f"cache_{from_date}_{to_date}.json"
+        dashboard_file = f"dashboard_{from_date}_{to_date}.html"
+    else:
+        cache_file     = CACHE_FILE
+        dashboard_file = DASHBOARD_FILE
+
     print("🔐 Login...")
     token = get_token()
     print("✅ Token OK")
@@ -963,9 +972,9 @@ def main():
 
     print("📊 Build dashboard HTML...")
     html = build_dashboard_html(raw, from_date, to_date)
-    with open(DASHBOARD_FILE, "w", encoding="utf-8") as f:
+    with open(dashboard_file, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"✅ Dashboard: {DASHBOARD_FILE}")
+    print(f"✅ Dashboard: {dashboard_file}")
 
     cache = {
         "updated_at": now_vn().strftime("%Y-%m-%d %H:%M:%S"),
@@ -973,9 +982,9 @@ def main():
         "to_date":    to_date,
         "raw":        raw,
     }
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+    with open(cache_file, "w", encoding="utf-8") as f:
         json.dump(cache, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"✅ Cache: {CACHE_FILE}")
+    print(f"✅ Cache: {cache_file}")
 
     print("🏁 Fetcher hoàn tất.")
 
