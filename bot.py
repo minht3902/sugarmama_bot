@@ -118,13 +118,9 @@ LIMITS = {
 
 # Tra ngưỡng nhanh theo (section, param)
 def get_limit(section, param):
-    """Trả về {'lo':..,'hi':..} hoặc None."""
+    """Trả về {'lo':..,'hi':..} hoặc None nếu không có ngưỡng."""
     if section in LIMITS and param in LIMITS[section]:
         return LIMITS[section][param]
-    # Fallback: tìm theo param trong tất cả sections
-    for lim_section, params in LIMITS.items():
-        if param in params:
-            return params[param]
     return None
 
 # Map từ COMMAND_MAP key → (section dùng để tra LIMITS, param)
@@ -610,21 +606,12 @@ def _format_summary_section(raw, section_name, section_key, items, from_d, to_d)
             label = item if isinstance(item, str) else item["label"]
             series = raw["mia"].get(label, [])
             name = label
-            lim = None
-            # Tra ngưỡng
-            for cmd, (sec, param) in LIMIT_LOOKUP.items():
-                if param == label or name == label:
-                    lim = get_limit(sec, param)
-                    break
+            lim = get_limit("Mía - Nước mía", label)
         elif section_key == "mat":
             label = item if isinstance(item, str) else item["label"]
             series = raw["mat"].get(label, [])
             name = label
-            lim = None
-            for cmd, (sec, param) in LIMIT_LOOKUP.items():
-                if param == label:
-                    lim = get_limit(sec, param)
-                    break
+            lim = get_limit("Mật rỉ - Bùn thô", label)
         elif section_key == "hoa":
             section, key = item
             series = raw["hoa"].get(section, {}).get(key, [])
@@ -879,16 +866,23 @@ async def cmd_summary(update, context):
     updated_at = cache.get("updated_at", "?")
 
     if from_d is None:
-        all_series = list(raw.get("mia", {}).values())
-        all_pts    = [pt for s in all_series for pt in s]
+        all_pts = []
+        for section_data in [raw.get("mia", {}), raw.get("mat", {})]:
+            for s in section_data.values():
+                all_pts.extend(s)
+        for section_data in raw.get("hoa", {}).values():
+            for s in section_data.values():
+                all_pts.extend(s)
+        for section_data in raw.get("nau", {}).values():
+            for s in section_data.values():
+                all_pts.extend(s)
         if all_pts:
-            latest = sorted({pt["t"][:10] for pt in all_pts}, reverse=True)
-            to_d   = latest[0]
-            from_d = latest[min(6, len(latest)-1)]
+            latest = sorted({pt["t"][:10] for pt in all_pts if pt.get("v") is not None}, reverse=True)
+            from_d = to_d = latest[0]
         else:
             await update.message.reply_text("📭 Không có dữ liệu trong cache.")
             return
-        date_label = f"7 ngày: {_fmt_date(from_d)} → {_fmt_date(to_d)}"
+        date_label = _fmt_date(to_d)
     elif from_d == to_d:
         date_label = _fmt_date(from_d)
     else:
