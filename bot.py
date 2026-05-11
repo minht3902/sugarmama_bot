@@ -723,7 +723,6 @@ async def cmd_help(update, context):
         "*Quản lý (chỉ admin):*\n"
         "`/add_user <chat_id>`  → thêm người dùng\n"
         "`/remove_user <chat_id>`  → xóa người dùng\n"
-        "`/update`  → cập nhật dữ liệu ngay\n"
         "`/newcache DD/MM/YYYY - DD/MM/YYYY`  → fetch dữ liệu cũ"
     )
     await _send(context, update.effective_chat.id, msg)
@@ -1117,37 +1116,6 @@ async def cmd_newcache(update, context):
 
 
 @_guard
-async def cmd_update(update, context):
-    if not _is_admin(update.effective_chat.id):
-        await update.message.reply_text("⛔ Chỉ admin mới dùng được lệnh này.")
-        return
-
-    await update.message.reply_text("⏳ Đang gửi lệnh cập nhật dữ liệu...")
-
-    try:
-        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/actions/workflows/fetch.yml/dispatches"
-        r = requests.post(
-            url,
-            headers=_gh_headers(),
-            json={"ref": "main"},
-            timeout=15
-        )
-        if r.status_code == 204:
-            await update.message.reply_text(
-                "✅ Đã gửi lệnh cập nhật!\n"
-                "⏱ Fetcher đang chạy, thường mất 2–3 phút.\n"
-                "Bot sẽ tự thông báo khi hoàn tất.",
-                parse_mode="Markdown"
-            )
-        else:
-            await update.message.reply_text(
-                f"❌ GitHub API trả về HTTP {r.status_code}.\n`{r.text[:300]}`",
-                parse_mode="Markdown"
-            )
-    except Exception as e:
-        await update.message.reply_text(f"❌ Lỗi gọi GitHub API: `{e}`", parse_mode="Markdown")
-
-
 # ========================
 # BUILD APP
 # ========================
@@ -1163,7 +1131,6 @@ def build_bot_app():
     app.add_handler(CommandHandler("add_user",    cmd_add_user))
     app.add_handler(CommandHandler("remove_user", cmd_remove_user))
     app.add_handler(CommandHandler("newcache",    cmd_newcache))
-    app.add_handler(CommandHandler("update",      cmd_update))
 
     for cmd in COMMAND_MAP:
         cmd_name = cmd.lstrip("/")
@@ -1186,7 +1153,6 @@ async def _register_commands(app):
         BotCommand("add_user",    "Thêm người dùng (admin)"),
         BotCommand("remove_user", "Xóa người dùng (admin)"),
         BotCommand("newcache",    "Fetch dữ liệu cũ (admin)"),
-        BotCommand("update",      "Cập nhật dữ liệu ngay (admin)"),
     ]
 
     # Lệnh indicator
