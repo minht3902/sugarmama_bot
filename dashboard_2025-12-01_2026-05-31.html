@@ -365,18 +365,22 @@ function renderOverview() {
     {s:'Bx mật cuối',p:'Bx mật cuối',d:'matri',c:'#f7c34f'},
     {s:'Ap mật rỉ',p:'Ap mật rỉ',d:'matri',c:'#f7774f'},
   ];
-  function getMonthlyStats(d, s, p) {
-    let key;
-    if (d === 'hoa') key = 'hoa|' + s + '|' + p;
-    else if (d === 'nau') key = 'nau|' + s + '|' + p;
-    else if (d === 'mia') key = 'mia|' + p;
-    else key = 'mat|' + p;
-    return RAW.stats?.[key] || null;
+  function calcFilteredStats(d, s, p) {
+    // Tính stats real-time từ filtered series (theo filterFrom/filterTo hiện tại)
+    const series = getSeries(s, p, d);
+    const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+    if (!vals.length) return null;
+    const mean = vals.reduce((a,b)=>a+b,0) / vals.length;
+    const std  = Math.sqrt(vals.reduce((a,b)=>a+(b-mean)**2,0) / vals.length);
+    return { mean: parseFloat(mean.toFixed(2)), std: parseFloat(std.toFixed(2)) };
   }
-  let kpiHtml = `<div class="section-header"><span class="dot" style="background:#4f8ef7"></span><span class="section-title">Chỉ số có ngưỡng kiểm soát – Trung bình Tháng 12/2025</span></div><div class="kpi-grid">`;
+  const dateLabel = filterFrom === filterTo
+    ? filterFrom
+    : filterFrom + ' → ' + filterTo;
+  let kpiHtml = `<div class="section-header"><span class="dot" style="background:#4f8ef7"></span><span class="section-title">Chỉ số có ngưỡng kiểm soát – Trung bình ${dateLabel}</span></div><div class="kpi-grid">`;
   kpiList.forEach(k=>{
     const lim = getLimit(k.s, k.p);
-    const ms = getMonthlyStats(k.d, k.s, k.p);
+    const ms = calcFilteredStats(k.d, k.s, k.p);
     if (!ms || ms.mean === null) return;
     const mean = ms.mean;
     const std = ms.std;
