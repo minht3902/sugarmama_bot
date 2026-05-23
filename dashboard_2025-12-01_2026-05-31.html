@@ -123,12 +123,23 @@
   }
   .bfbtn:hover { border-color:var(--c1); color:var(--text); }
   .bfbtn.active { background:rgba(79,142,247,.15); border-color:var(--c1); color:#fff; }
+  .ov-group { margin-bottom:8px; }
+  .ov-group-header {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:10px 14px; background:var(--surface); border:1px solid var(--border);
+    border-left:3px solid var(--border); border-radius:var(--radius);
+    cursor:pointer; transition:background .15s, border-color .15s;
+    user-select:none;
+  }
+  .ov-group-header:hover { background:var(--surface2); }
+  .ov-chevron { font-size:10px; color:var(--muted); transition:transform .2s; }
+  .ov-group-body { padding:10px 4px 4px; }
 </style>
 </head>
 <body>
 <header>
   <div class="header-left">
-    <h1>📊 Dashboard Kiểm Soát Dây Chuyền &nbsp;<span style="font-size:12px;font-weight:400;color:var(--muted)">Tháng 12/2025</span></h1>
+    <h1>📊 Dashboard Kiểm Soát Dây Chuyền</h1>
   </div>
   <div class="header-right">
     <div class="date-filter">
@@ -389,140 +400,198 @@ function legendBar() {
 function renderOverview() {
   const mc = document.getElementById('mainContent');
 
-  // Danh sách ĐẦY ĐỦ tất cả thông số — kể cả không có ngưỡng
-  const kpiList = [
-    {s:'Syrup sau lắng nổi',   p:'Ap',         d:'hoa', c:'#4f8ef7'},
-    {s:'Syrup sau lắng nổi',   p:'Bx',         d:'hoa', c:'#4fc9a4'},
-    {s:'Syrup sau lắng nổi',   p:'Pol',        d:'hoa', c:'#b44ff7'},
-    {s:'Syrup sau lắng nổi',   p:'pH',         d:'hoa', c:'#f7c34f'},
-    {s:'Syrup sau lắng nổi',   p:'Độ màu',     d:'hoa', c:'#f7774f'},
-    {s:'Syrup trước lắng nổi', p:'Bx',         d:'hoa', c:'#4fc9a4'},
-    {s:'Syrup trước lắng nổi', p:'pH',         d:'hoa', c:'#f7c34f'},
-    {s:'Syrup trước lắng nổi', p:'Độ màu',     d:'hoa', c:'#f7774f'},
-    {s:'Nước chè trong 2',     p:'Ap',         d:'hoa', c:'#4f8ef7'},
-    {s:'Nước chè trong 2',     p:'Bx',         d:'hoa', c:'#4fc9a4'},
-    {s:'Nước chè trong 2',     p:'Pol',        d:'hoa', c:'#b44ff7'},
-    {s:'Nước chè trong 2',     p:'pH',         d:'hoa', c:'#f7c34f'},
-    {s:'Nước chè trong 2',     p:'Độ màu',     d:'hoa', c:'#f7774f'},
-    {s:'Nước chè trong 2',     p:'Độ đục (IU)',d:'hoa', c:'#b44ff7'},
-    {s:'Sirô thô sau bốc hơi', p:'Ap',         d:'hoa', c:'#4f8ef7'},
-    {s:'Sirô thô sau bốc hơi', p:'Bx',         d:'hoa', c:'#4fc9a4'},
-    {s:'Sirô thô sau bốc hơi', p:'Pol',        d:'hoa', c:'#b44ff7'},
-    {s:'Sirô thô sau bốc hơi', p:'pH',         d:'hoa', c:'#f7c34f'},
-    {s:'Sirô thô sau bốc hơi', p:'Độ màu',     d:'hoa', c:'#f7774f'},
-    {s:'Đường non A',   p:'Ap',  d:'nau', c:'#4f8ef7'},
-    {s:'Đường non A',   p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Đường non A',   p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Đường non B',   p:'Ap',  d:'nau', c:'#4f8ef7'},
-    {s:'Đường non B',   p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Đường non B',   p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Đường non C',   p:'Ap',  d:'nau', c:'#4f8ef7'},
-    {s:'Đường non C',   p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Đường non C',   p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Đường B',       p:'Ap',  d:'nau', c:'#4f8ef7'},
-    {s:'Đường B',       p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Đường B',       p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Đường C',       p:'Ap',  d:'nau', c:'#4f8ef7'},
-    {s:'Đường C',       p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Đường C',       p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Mật nguyên A',  p:'Ap',  d:'nau', c:'#f7774f'},
-    {s:'Mật nguyên A',  p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Mật nguyên A',  p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Mật loãng A',   p:'Ap',  d:'nau', c:'#f7774f'},
-    {s:'Mật loãng A',   p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Mật loãng A',   p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Mật B',         p:'Ap',  d:'nau', c:'#f7774f'},
-    {s:'Mật B',         p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Mật B',         p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Hồi dung B',    p:'Ap',  d:'nau', c:'#4f8ef7'},
-    {s:'Hồi dung B',    p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Hồi dung B',    p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Hồi dung B',    p:'Độ màu',d:'nau',c:'#f7774f'},
-    {s:'Hồi dung C',    p:'Ap',  d:'nau', c:'#4f8ef7'},
-    {s:'Hồi dung C',    p:'Bx',  d:'nau', c:'#4fc9a4'},
-    {s:'Hồi dung C',    p:'Pol', d:'nau', c:'#b44ff7'},
-    {s:'Hồi dung C',    p:'Độ màu',d:'nau',c:'#f7774f'},
-    {s:'Pol bã',        p:'Pol bã',       d:'mia', c:'#4f8ef7'},
-    {s:'Ẩm bã',         p:'Ẩm bã',        d:'mia', c:'#4fc9a4'},
-    {s:'Xơ mía',        p:'Xơ mía',       d:'mia', c:'#f7c34f'},
-    {s:'pH gia vôi NM HH',p:'pH gia vôi NM HH',d:'mia',c:'#f7c34f'},
-    {s:'pH NM trung hòa', p:'pH NM trung hòa', d:'mia',c:'#4fc9a4'},
-    {s:'Ap NM HH',      p:'Ap NM HH',     d:'mia', c:'#4f8ef7'},
-    {s:'Bx NM HH',      p:'Bx NM HH',     d:'mia', c:'#4fc9a4'},
-    {s:'Pol NM HH',     p:'Pol NM HH',    d:'mia', c:'#b44ff7'},
-    {s:'Ap NM đầu',     p:'Ap NM đầu',    d:'mia', c:'#4f8ef7'},
-    {s:'Bx NM đầu',     p:'Bx NM đầu',    d:'mia', c:'#4fc9a4'},
-    {s:'Pol NM đầu',    p:'Pol NM đầu',   d:'mia', c:'#b44ff7'},
-    {s:'Ap NM cuối',    p:'Ap NM cuối',   d:'mia', c:'#4f8ef7'},
-    {s:'Bx NM cuối',    p:'Bx NM cuối',   d:'mia', c:'#4fc9a4'},
-    {s:'Pol NM cuối',   p:'Pol NM cuối',  d:'mia', c:'#b44ff7'},
-    {s:'P2O5',          p:'P2O5',         d:'mia', c:'#f7c34f'},
-    {s:'Pol bùn',       p:'Pol bùn',      d:'matri',c:'#4f8ef7'},
-    {s:'Độ ẩm bùn',     p:'Độ ẩm bùn',   d:'matri',c:'#4fc9a4'},
-    {s:'Ap mật cuối',   p:'Ap mật cuối',  d:'matri',c:'#f7774f'},
-    {s:'Bx mật cuối',   p:'Bx mật cuối',  d:'matri',c:'#f7c34f'},
-    {s:'Pol mật cuối',  p:'Pol mật cuối', d:'matri',c:'#b44ff7'},
-    {s:'RS mật cuối',   p:'RS mật cuối',  d:'matri',c:'#4ff7d8'},
-    {s:'Ap mật rỉ',     p:'Ap mật rỉ',    d:'matri',c:'#f7774f'},
-    {s:'Bx mật rỉ',     p:'Bx mật rỉ',    d:'matri',c:'#f7c34f'},
-    {s:'Bx1 mật rỉ',    p:'Bx1 mật rỉ',   d:'matri',c:'#4fc9a4'},
-    {s:'Pol mật rỉ',    p:'Pol mật rỉ',   d:'matri',c:'#b44ff7'},
+  // Nhóm theo Tab — giống cấu trúc các tab ngang hàng
+  const TAB_GROUPS = [
+    {
+      tab: 'hoa1', label: 'Syrup sau lắng nổi', color: '#4f8ef7', d: 'hoa',
+      sections: [
+        {s:'Syrup sau lắng nổi', ps:['Ap','Bx','Pol','pH','Độ màu']}
+      ]
+    },
+    {
+      tab: 'hoa2', label: 'Syrup trước lắng nổi', color: '#4fc9a4', d: 'hoa',
+      sections: [
+        {s:'Syrup trước lắng nổi', ps:['Bx','pH','Độ màu']}
+      ]
+    },
+    {
+      tab: 'hoa3', label: 'Nước chè trong 2', color: '#f7c34f', d: 'hoa',
+      sections: [
+        {s:'Nước chè trong 2', ps:['Ap','Bx','Pol','pH','Độ màu','Độ đục (IU)']}
+      ]
+    },
+    {
+      tab: 'hoa4', label: 'Sirô thô sau bốc hơi', color: '#b44ff7', d: 'hoa',
+      sections: [
+        {s:'Sirô thô sau bốc hơi', ps:['Ap','Bx','Pol','pH','Độ màu']}
+      ]
+    },
+    {
+      tab: 'nau1', label: 'Đường non A / B / C', color: '#f7774f', d: 'nau',
+      sections: [
+        {s:'Đường non A', ps:['Ap','Bx','Pol']},
+        {s:'Đường non B', ps:['Ap','Bx','Pol']},
+        {s:'Đường non C', ps:['Ap','Bx','Pol']},
+      ]
+    },
+    {
+      tab: 'nau2', label: 'Đường B & C', color: '#4fc9a4', d: 'nau',
+      sections: [
+        {s:'Đường B', ps:['Ap','Bx','Pol']},
+        {s:'Đường C', ps:['Ap','Bx','Pol']},
+      ]
+    },
+    {
+      tab: 'nau3', label: 'Mật & Hồi dung', color: '#f7c34f', d: 'nau',
+      sections: [
+        {s:'Mật nguyên A', ps:['Ap','Bx','Pol']},
+        {s:'Mật loãng A',  ps:['Ap','Bx','Pol']},
+        {s:'Mật B',        ps:['Ap','Bx','Pol']},
+        {s:'Hồi dung B',   ps:['Ap','Bx','Pol','Độ màu']},
+        {s:'Hồi dung C',   ps:['Ap','Bx','Pol','Độ màu']},
+      ]
+    },
+    {
+      tab: 'mia', label: 'Mía – Nước mía', color: '#4f8ef7', d: 'mia',
+      sections: [
+        {s:'Pol bã',          ps:['Pol bã']},
+        {s:'Ẩm bã',           ps:['Ẩm bã']},
+        {s:'Xơ mía',          ps:['Xơ mía']},
+        {s:'pH gia vôi NM HH',ps:['pH gia vôi NM HH']},
+        {s:'pH NM trung hòa', ps:['pH NM trung hòa']},
+        {s:'Ap NM HH',        ps:['Ap NM HH']},
+        {s:'Bx NM HH',        ps:['Bx NM HH']},
+        {s:'Pol NM HH',       ps:['Pol NM HH']},
+        {s:'Ap NM đầu',       ps:['Ap NM đầu']},
+        {s:'Bx NM đầu',       ps:['Bx NM đầu']},
+        {s:'Pol NM đầu',      ps:['Pol NM đầu']},
+        {s:'Ap NM cuối',      ps:['Ap NM cuối']},
+        {s:'Bx NM cuối',      ps:['Bx NM cuối']},
+        {s:'Pol NM cuối',     ps:['Pol NM cuối']},
+        {s:'P2O5',            ps:['P2O5']},
+      ]
+    },
+    {
+      tab: 'matri', label: 'Mật rỉ – Bùn thô', color: '#f7774f', d: 'matri',
+      sections: [
+        {s:'Pol bùn',    ps:['Pol bùn']},
+        {s:'Độ ẩm bùn',  ps:['Độ ẩm bùn']},
+        {s:'Ap mật cuối',ps:['Ap mật cuối']},
+        {s:'Bx mật cuối',ps:['Bx mật cuối']},
+        {s:'Pol mật cuối',ps:['Pol mật cuối']},
+        {s:'RS mật cuối', ps:['RS mật cuối']},
+        {s:'Ap mật rỉ',  ps:['Ap mật rỉ']},
+        {s:'Bx mật rỉ',  ps:['Bx mật rỉ']},
+        {s:'Bx1 mật rỉ', ps:['Bx1 mật rỉ']},
+        {s:'Pol mật rỉ', ps:['Pol mật rỉ']},
+      ]
+    },
   ];
 
   const dateLabel = filterFrom === filterTo ? filterFrom : filterFrom + ' → ' + filterTo;
 
-  // Tính breach summary tổng
-  let totalBreach = 0, totalPts = 0, withLimCount = 0, withLimBreach = 0;
-  const groups = {};
-
-  kpiList.forEach(k => {
-    const series = getSeries(k.s, k.p, k.d);
-    if (!series.length) return;
-    const lim = getLimit(k.s, k.p);
+  // Tính tổng breach cho banner summary
+  let withLimCount = 0, withLimBreach = 0, totalPts = 0;
+  TAB_GROUPS.forEach(g => g.sections.forEach(sec => sec.ps.forEach(p => {
+    const series = getSeries(sec.s, p, g.d);
     const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
-    if (!vals.length) return;
-    const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
-    let bc=0, ac=0, blc=0;
-    if (lim) vals.forEach(v=>{ if(v>lim.hi){bc++;ac++;} else if(v<lim.lo){bc++;blc++;} });
     totalPts += vals.length;
-    if (lim) { totalBreach += bc; withLimCount += vals.length; withLimBreach += bc; }
-
-    if (!groups[k.s]) groups[k.s] = [];
-    groups[k.s].push({...k, mean:parseFloat(mean.toFixed(2)), lim, bc, ac, blc, total:vals.length});
-  });
-
-  const pctOverall = withLimCount>0 ? ((withLimBreach/withLimCount)*100).toFixed(1) : '—';
+    const lim = getLimit(sec.s, p);
+    if (lim) {
+      withLimCount += vals.length;
+      vals.forEach(v => { if (v > lim.hi || v < lim.lo) withLimBreach++; });
+    }
+  })));
+  const pctOverall = withLimCount > 0 ? ((withLimBreach/withLimCount)*100).toFixed(1) : '—';
 
   let html = `
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
-      <div class="chip-pts" style="font-size:11px;padding:6px 14px">📍 ${totalPts} điểm đo tổng</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+      <div class="chip-pts" style="font-size:11px;padding:6px 14px">📍 ${totalPts} điểm đo</div>
       <div class="chip-pts" style="font-size:11px;padding:6px 14px;background:rgba(247,119,79,.1);border-color:rgba(247,119,79,.3);color:#f7774f">
         ⚠️ ${withLimBreach}/${withLimCount} lệch ngưỡng (${pctOverall}%)
       </div>
       <div class="chip-pts" style="font-size:11px;padding:6px 14px;color:var(--muted)">📅 ${dateLabel}</div>
-    </div>
-    <div class="section-header"><span class="dot" style="background:#4f8ef7"></span><span class="section-title">Tất cả thông số – Trung bình kỳ</span></div>`;
+    </div>`;
 
-  // Render từng group (section)
-  Object.entries(groups).forEach(([sec, items]) => {
-    html += `<div class="section-group"><div class="sub-label">${sec}</div><div class="kpi-grid">`;
-    items.forEach(k => {
-      const inRange = k.lim ? (k.mean >= k.lim.lo && k.mean <= k.lim.hi) : null;
-      const breachClass = k.lim ? (inRange ? 'ok-card' : 'breach') : '';
-      const pct = (k.total>0 && k.lim) ? ((k.bc/k.total)*100).toFixed(1) : null;
-      html += `<div class="kpi-card ${breachClass}">
-        <div class="kpi-param">${k.p}</div>
-        <div class="kpi-val" style="color:${inRange===false?'#f7774f':inRange===true?'#4fc9a4':k.c}">${k.mean.toFixed(2)}</div>
-        ${k.lim ? `<div class="kpi-range">Ngưỡng: ${k.lim.lo}–${k.lim.hi} ${inRange===false?'⚠️':'✓'}</div>` : '<div class="kpi-range" style="color:#555">— Không có ngưỡng</div>'}
-        ${k.lim && k.bc>0 ? `<div style="font-size:10px;color:#f7774f;margin-top:3px">⚠️ ${k.bc}/${k.total} lệch (${pct}%)</div>` : ''}
-        ${k.lim && k.bc===0 ? `<div style="font-size:10px;color:#4fc9a4;margin-top:3px">✓ ${k.total} điểm đạt chuẩn</div>` : ''}
-        ${!k.lim ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">n = ${k.total}</div>` : ''}
-      </div>`;
+  // Render từng nhóm tab dạng accordion
+  TAB_GROUPS.forEach((g, gi) => {
+    // Tính breach summary của cả nhóm
+    let gBreach = 0, gTotal = 0, gWithLim = 0;
+    g.sections.forEach(sec => sec.ps.forEach(p => {
+      const vals = getSeries(sec.s, p, g.d).filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+      gTotal += vals.length;
+      const lim = getLimit(sec.s, p);
+      if (lim) {
+        gWithLim += vals.length;
+        vals.forEach(v => { if (v > lim.hi || v < lim.lo) gBreach++; });
+      }
+    }));
+    const gPct = gWithLim > 0 ? ((gBreach/gWithLim)*100).toFixed(1) : null;
+    const gBadge = gBreach > 0
+      ? `<span style="font-size:10px;color:#f7774f;background:rgba(247,119,79,.15);border:1px solid rgba(247,119,79,.3);padding:2px 8px;border-radius:10px;margin-left:8px">⚠️ ${gBreach} lệch (${gPct}%)</span>`
+      : (gWithLim > 0 ? `<span style="font-size:10px;color:#4fc9a4;background:rgba(79,201,164,.1);border:1px solid rgba(79,201,164,.25);padding:2px 8px;border-radius:10px;margin-left:8px">✓ Đạt chuẩn</span>` : '');
+
+    html += `
+    <div class="ov-group" id="ovg_${gi}">
+      <div class="ov-group-header" onclick="toggleOvGroup(${gi})" style="border-left-color:${g.color}">
+        <div style="display:flex;align-items:center;gap:0">
+          <span class="dot" style="background:${g.color};margin-right:10px"></span>
+          <span style="font-size:13px;font-weight:700;color:#fff">${g.label}</span>
+          ${gBadge}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:10px;color:var(--muted)">${gTotal} điểm</span>
+          <span class="ov-chevron" id="chev_${gi}">▼</span>
+        </div>
+      </div>
+      <div class="ov-group-body" id="ovbody_${gi}">`;
+
+    // Các section con — render dạng bảng hàng ngang
+    g.sections.forEach(sec => {
+      // Với mia/matri mỗi "section" chỉ có 1 param, gộp chung vào 1 bảng
+      const isFlat = g.tab === 'mia' || g.tab === 'matri';
+      if (!isFlat) {
+        html += `<div style="font-size:11px;color:var(--muted);font-weight:600;margin:10px 0 6px;letter-spacing:.3px">${sec.s}</div>`;
+      }
+      html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">`;
+      sec.ps.forEach(p => {
+        const src = isFlat ? sec.s : sec.s;
+        const series = getSeries(src, p, g.d);
+        const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+        if (!vals.length) return;
+        const mean = (vals.reduce((a,b)=>a+b,0)/vals.length);
+        const lim = getLimit(src, p);
+        let bc = 0;
+        if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
+        const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
+        const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
+        const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
+        const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
+        const paramLabel = isFlat ? sec.s : p;
+        html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:10px 14px;min-width:130px;flex:1;max-width:200px;cursor:pointer"
+          onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
+          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${paramLabel}</div>
+          <div style="font-size:18px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
+          ${lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:3px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9.5px;color:#444;margin-top:3px">— không ngưỡng</div>'}
+          ${lim && bc > 0 ? `<div style="font-size:9.5px;color:#f7774f;margin-top:2px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
+          ${lim && bc === 0 ? `<div style="font-size:9.5px;color:#4fc9a4;margin-top:2px">✓ ${vals.length} điểm</div>` : ''}
+          ${!lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:2px">n = ${vals.length}</div>` : ''}
+        </div>`;
+      });
+      html += `</div>`;
     });
-    html += '</div></div>';
+
+    html += `</div></div>`;
   });
 
   mc.innerHTML = html;
+}
+function toggleOvGroup(i) {
+  const body  = document.getElementById('ovbody_' + i);
+  const chev  = document.getElementById('chev_' + i);
+  const open  = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chev.textContent   = open ? '▶' : '▼';
 }
 function renderSingle(section, dataset, params, color) {
   const mc = document.getElementById('mainContent');
