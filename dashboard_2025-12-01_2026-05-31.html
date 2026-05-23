@@ -224,10 +224,12 @@ function getSeries(section, param, dataset) {
 }
 function calcStats(series, lim) {
   const clean = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
-  if (!clean.length) return {min:'N/A',max:'N/A',avg:'N/A',last:'N/A',trend:'flat',breachCount:0,aboveCount:0,belowCount:0,total:0};
-  const avg = (clean.reduce((a,b)=>a+b,0)/clean.length).toFixed(2);
-  const min = Math.min(...clean).toFixed(2);
-  const max = Math.max(...clean).toFixed(2);
+  if (!clean.length) return {min:'N/A',max:'N/A',avg:'N/A',std:'N/A',last:'N/A',trend:'flat',breachCount:0,aboveCount:0,belowCount:0,total:0};
+  const mean = clean.reduce((a,b)=>a+b,0)/clean.length;
+  const avg  = mean.toFixed(2);
+  const std  = Math.sqrt(clean.reduce((a,b)=>a+(b-mean)**2,0)/clean.length).toFixed(2);
+  const min  = Math.min(...clean).toFixed(2);
+  const max  = Math.max(...clean).toFixed(2);
   const last = clean[clean.length-1].toFixed(2);
   const prev = clean.length>1 ? clean[clean.length-2] : clean[0];
   const trend = clean[clean.length-1]>prev+0.01?'up':clean[clean.length-1]<prev-0.01?'down':'flat';
@@ -236,7 +238,7 @@ function calcStats(series, lim) {
     if (v > lim.hi) { breachCount++; aboveCount++; }
     else if (v < lim.lo) { breachCount++; belowCount++; }
   });
-  return {min,max,avg,last,trend,breachCount,aboveCount,belowCount,total:clean.length};
+  return {min,max,avg,std,last,trend,breachCount,aboveCount,belowCount,total:clean.length};
 }
 function makeChart(id, seriesList, section, singleParam) {
   const ctx = document.getElementById(id);
@@ -324,36 +326,44 @@ function cardHtml(id, title, section, param, dataset) {
   const tIcon = s.trend==='up'?'▲':s.trend==='down'?'▼':'—';
   const lastNum = parseFloat(s.last);
   const inRange = lim ? (lastNum>=lim.lo && lastNum<=lim.hi) : null;
-  const pct = (s.total>0 && lim) ? ((s.breachCount/s.total)*100).toFixed(1) : null;
+  const pctTotal  = (s.total>0 && lim) ? ((s.breachCount/s.total)*100).toFixed(1) : null;
+  const pctAbove  = (s.total>0 && lim) ? ((s.aboveCount/s.total)*100).toFixed(1) : null;
+  const pctBelow  = (s.total>0 && lim) ? ((s.belowCount/s.total)*100).toFixed(1) : null;
+  const breachDetail = lim && s.breachCount>0 ? `
+    <div style="font-size:9.5px;color:var(--muted);margin-top:4px;line-height:1.7">
+      <span style="color:#f7774f">▲ Vượt trên: ${s.aboveCount}/${s.total} (${pctAbove}%)</span><br>
+      <span style="color:#f7c34f">▼ Dưới cận: ${s.belowCount}/${s.total} (${pctBelow}%)</span><br>
+      <span style="color:#f7774f">⚠️ Tổng lệch: ${s.breachCount}/${s.total} (${pctTotal}%)</span>
+    </div>` : '';
   const badges = `<div class="card-badges">
     <span class="cbadge">${section}</span>
     ${lim ? `<span class="cbadge limit-badge">↕ ${lim.lo}–${lim.hi}</span>` : ''}
     ${lim && s.breachCount>0 ? `
-      <span class="cbadge breach-badge" style="background:rgba(247,119,79,.2);color:#f7774f;border:1px solid rgba(247,119,79,.3);cursor:pointer"
+      <span class="cbadge breach-badge" style="background:rgba(247,119,79,.2);color:#f7774f;border:1px solid rgba(247,119,79,.3);cursor:pointer;position:relative"
         onclick="toggleBreachFilter(event,'${id}','${section}','${param}','${dataset}')">
-        ⚠️ ${s.breachCount} lệch (${pct}%) ▾
+        ⚠️ ${s.breachCount} lệch (${pctTotal}%) ▾
       </span>` : ''}
     ${lim && s.breachCount===0 && series.length>0 ? `<span class="cbadge" style="background:rgba(79,201,164,.12);color:#4fc9a4;border:1px solid rgba(79,201,164,.25)">✓ Đạt chuẩn</span>` : ''}
   </div>`;
   const lastClass = lim ? (inRange ? 'ok' : 'breach') : '';
-  const breachStat = lim ? `<div class="stat-item ${s.breachCount>0?'breach':'ok'}"><div class="stat-val">${s.breachCount}/${s.total}</div><div class="stat-lbl">Lệch/Tổng ${pct?pct+'%':''}</div></div>` : '';
   return `<div class="chart-card" id="card_${id}">
     <div class="card-top"><div class="card-title">${title}</div>${badges}</div>
-    <div id="bfilter_${id}" style="display:none;padding:4px 0 8px;display:none">
+    <div id="bfilter_${id}" style="display:none;padding:4px 0 8px">
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="bfbtn active" data-card="${id}" data-mode="all" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">Tất cả</button>
-        <button class="bfbtn" data-card="${id}" data-mode="above" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▲ Vượt cận trên (${s.aboveCount})</button>
-        <button class="bfbtn" data-card="${id}" data-mode="below" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▼ Dưới cận dưới (${s.belowCount})</button>
-        <button class="bfbtn" data-card="${id}" data-mode="breach" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">⚠️ Chỉ điểm lệch (${s.breachCount})</button>
+        <button class="bfbtn active" data-card="${id}" data-mode="all" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">Tất cả (${s.total})</button>
+        <button class="bfbtn" data-card="${id}" data-mode="above" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▲ Vượt cận trên (${s.aboveCount}, ${pctAbove}%)</button>
+        <button class="bfbtn" data-card="${id}" data-mode="below" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▼ Dưới cận dưới (${s.belowCount}, ${pctBelow}%)</button>
+        <button class="bfbtn" data-card="${id}" data-mode="breach" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">⚠️ Tổng lệch (${s.breachCount}, ${pctTotal}%)</button>
       </div>
+      ${breachDetail}
     </div>
     <div class="chart-wrap"><canvas id="${id}"></canvas></div>
     <div class="stat-row">
       <div class="stat-item"><div class="stat-val">${s.avg}</div><div class="stat-lbl">Trung bình</div></div>
+      <div class="stat-item"><div class="stat-val" style="color:var(--muted)">${s.std}</div><div class="stat-lbl">Std Dev (σ)</div></div>
       <div class="stat-item"><div class="stat-val" style="color:#4fc9a4">${s.min}</div><div class="stat-lbl">Min</div></div>
       <div class="stat-item"><div class="stat-val" style="color:#f7774f">${s.max}</div><div class="stat-lbl">Max</div></div>
       <div class="stat-item ${lastClass}"><div class="stat-val ${s.trend}">${tIcon} ${s.last}</div><div class="stat-lbl">Gần nhất ${lim?(inRange?'✓':'⚠️'):''}</div></div>
-      ${breachStat}
     </div>
   </div>`;
 }
@@ -548,60 +558,53 @@ function renderOverview() {
 
     // Các section con — render dạng bảng hàng ngang
     const isFlat = g.tab === 'mia' || g.tab === 'matri';
+
+    // Helper tạo mini-card dùng chung cho cả isFlat và non-flat
+    function ovCard(sec, p, label) {
+      const series = getSeries(sec, p, g.d);
+      const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+      if (!vals.length) return '';
+      const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+      const std  = Math.sqrt(vals.reduce((a,b)=>a+(b-mean)**2,0)/vals.length);
+      const lim  = getLimit(sec, p);
+      let bc=0, ac=0, blc=0;
+      if (lim) vals.forEach(v=>{ if(v>lim.hi){bc++;ac++;} else if(v<lim.lo){bc++;blc++;} });
+      const inRange   = lim ? (mean>=lim.lo && mean<=lim.hi) : null;
+      const pctTotal  = (lim && vals.length) ? ((bc/vals.length)*100).toFixed(1)  : null;
+      const pctAbove  = (lim && vals.length) ? ((ac/vals.length)*100).toFixed(1)  : null;
+      const pctBelow  = (lim && vals.length) ? ((blc/vals.length)*100).toFixed(1) : null;
+      const valColor  = inRange===false ? '#f7774f' : inRange===true ? '#4fc9a4' : '#e4e6f0';
+      const border    = inRange===false ? 'rgba(247,119,79,.4)' : inRange===true ? 'rgba(79,201,164,.2)' : 'var(--border)';
+      const pad       = isFlat ? '9px 12px' : '10px 14px';
+      const minW      = isFlat ? '110px' : '130px';
+      const flex      = isFlat ? '1 1 110px' : '1 1 130px';
+      const fs        = isFlat ? '9px' : '9.5px';
+      const fsVal     = isFlat ? '16px' : '18px';
+      const breachLines = lim && bc>0 ? `
+        <div style="font-size:${fs};color:#f7774f;margin-top:1px">▲ ${ac}/${vals.length} (${pctAbove}%)</div>
+        <div style="font-size:${fs};color:#f7c34f;margin-top:0">▼ ${blc}/${vals.length} (${pctBelow}%)</div>
+        <div style="font-size:${fs};color:#f7774f;margin-top:0">⚠️ ${bc}/${vals.length} (${pctTotal}%)</div>` : '';
+      return `<div style="background:var(--surface2);border:1px solid ${border};border-radius:10px;padding:${pad};min-width:${minW};flex:${flex};cursor:pointer"
+        onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
+        <div style="font-size:${fs};color:var(--muted);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label}</div>
+        <div style="font-size:${fsVal};font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
+        <div style="font-size:${fs};color:var(--muted);margin-top:2px">σ ${std.toFixed(2)}</div>
+        ${lim ? `<div style="font-size:${fs};color:var(--muted);margin-top:1px">↕ ${lim.lo}–${lim.hi}</div>` : `<div style="font-size:${fs};color:#444;margin-top:1px">— không ngưỡng</div>`}
+        ${lim && bc===0 ? `<div style="font-size:${fs};color:#4fc9a4;margin-top:1px">✓ ${vals.length} điểm</div>` : ''}
+        ${!lim ? `<div style="font-size:${fs};color:var(--muted);margin-top:1px">n=${vals.length}</div>` : ''}
+        ${breachLines}
+      </div>`;
+    }
+
     if (isFlat) {
-      // Gộp toàn bộ params vào 1 hàng flex duy nhất, wrap tự nhiên theo chiều ngang
       html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">`;
-      g.sections.forEach(sec => {
-        sec.ps.forEach(p => {
-          const series = getSeries(sec.s, p, g.d);
-          const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
-          if (!vals.length) return;
-          const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
-          const lim = getLimit(sec.s, p);
-          let bc = 0;
-          if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
-          const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
-          const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
-          const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
-          const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
-          html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:9px 12px;min-width:110px;flex:1 1 110px;cursor:pointer"
-            onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
-            <div style="font-size:9.5px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sec.s}</div>
-            <div style="font-size:17px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
-            ${lim ? `<div style="font-size:9px;color:var(--muted);margin-top:2px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9px;color:#444;margin-top:2px">— không ngưỡng</div>'}
-            ${lim && bc > 0 ? `<div style="font-size:9px;color:#f7774f;margin-top:1px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
-            ${lim && bc === 0 ? `<div style="font-size:9px;color:#4fc9a4;margin-top:1px">✓ ${vals.length}đ</div>` : ''}
-            ${!lim ? `<div style="font-size:9px;color:var(--muted);margin-top:1px">n=${vals.length}</div>` : ''}
-          </div>`;
-        });
-      });
+      g.sections.forEach(sec => sec.ps.forEach(p => { html += ovCard(sec.s, p, sec.s); }));
       html += `</div>`;
     } else {
       g.sections.forEach(sec => {
         html += `<div style="font-size:11px;color:var(--muted);font-weight:600;margin:10px 0 6px;letter-spacing:.3px">${sec.s}</div>`;
         html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">`;
-        sec.ps.forEach(p => {
-          const series = getSeries(sec.s, p, g.d);
-          const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
-          if (!vals.length) return;
-          const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
-          const lim = getLimit(sec.s, p);
-          let bc = 0;
-          if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
-          const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
-          const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
-          const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
-          const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
-          html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:10px 14px;min-width:130px;flex:1;max-width:200px;cursor:pointer"
-            onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
-            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p}</div>
-            <div style="font-size:18px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
-            ${lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:3px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9.5px;color:#444;margin-top:3px">— không ngưỡng</div>'}
-            ${lim && bc > 0 ? `<div style="font-size:9.5px;color:#f7774f;margin-top:2px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
-            ${lim && bc === 0 ? `<div style="font-size:9.5px;color:#4fc9a4;margin-top:2px">✓ ${vals.length} điểm</div>` : ''}
-            ${!lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:2px">n = ${vals.length}</div>` : ''}
-          </div>`;
-        });
+        sec.ps.forEach(p => { html += ovCard(sec.s, p, p); });
         html += `</div>`;
       });
     }
