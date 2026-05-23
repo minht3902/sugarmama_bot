@@ -547,39 +547,64 @@ function renderOverview() {
       <div class="ov-group-body" id="ovbody_${gi}">`;
 
     // Các section con — render dạng bảng hàng ngang
-    g.sections.forEach(sec => {
-      // Với mia/matri mỗi "section" chỉ có 1 param, gộp chung vào 1 bảng
-      const isFlat = g.tab === 'mia' || g.tab === 'matri';
-      if (!isFlat) {
-        html += `<div style="font-size:11px;color:var(--muted);font-weight:600;margin:10px 0 6px;letter-spacing:.3px">${sec.s}</div>`;
-      }
-      html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">`;
-      sec.ps.forEach(p => {
-        const src = isFlat ? sec.s : sec.s;
-        const series = getSeries(src, p, g.d);
-        const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
-        if (!vals.length) return;
-        const mean = (vals.reduce((a,b)=>a+b,0)/vals.length);
-        const lim = getLimit(src, p);
-        let bc = 0;
-        if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
-        const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
-        const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
-        const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
-        const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
-        const paramLabel = isFlat ? sec.s : p;
-        html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:10px 14px;min-width:130px;flex:1;max-width:200px;cursor:pointer"
-          onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
-          <div style="font-size:10px;color:var(--muted);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${paramLabel}</div>
-          <div style="font-size:18px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
-          ${lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:3px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9.5px;color:#444;margin-top:3px">— không ngưỡng</div>'}
-          ${lim && bc > 0 ? `<div style="font-size:9.5px;color:#f7774f;margin-top:2px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
-          ${lim && bc === 0 ? `<div style="font-size:9.5px;color:#4fc9a4;margin-top:2px">✓ ${vals.length} điểm</div>` : ''}
-          ${!lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:2px">n = ${vals.length}</div>` : ''}
-        </div>`;
+    const isFlat = g.tab === 'mia' || g.tab === 'matri';
+    if (isFlat) {
+      // Gộp toàn bộ params vào 1 hàng flex duy nhất, wrap tự nhiên theo chiều ngang
+      html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">`;
+      g.sections.forEach(sec => {
+        sec.ps.forEach(p => {
+          const series = getSeries(sec.s, p, g.d);
+          const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+          if (!vals.length) return;
+          const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+          const lim = getLimit(sec.s, p);
+          let bc = 0;
+          if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
+          const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
+          const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
+          const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
+          const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
+          html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:9px 12px;min-width:110px;flex:1 1 110px;cursor:pointer"
+            onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
+            <div style="font-size:9.5px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sec.s}</div>
+            <div style="font-size:17px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
+            ${lim ? `<div style="font-size:9px;color:var(--muted);margin-top:2px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9px;color:#444;margin-top:2px">— không ngưỡng</div>'}
+            ${lim && bc > 0 ? `<div style="font-size:9px;color:#f7774f;margin-top:1px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
+            ${lim && bc === 0 ? `<div style="font-size:9px;color:#4fc9a4;margin-top:1px">✓ ${vals.length}đ</div>` : ''}
+            ${!lim ? `<div style="font-size:9px;color:var(--muted);margin-top:1px">n=${vals.length}</div>` : ''}
+          </div>`;
+        });
       });
       html += `</div>`;
-    });
+    } else {
+      g.sections.forEach(sec => {
+        html += `<div style="font-size:11px;color:var(--muted);font-weight:600;margin:10px 0 6px;letter-spacing:.3px">${sec.s}</div>`;
+        html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">`;
+        sec.ps.forEach(p => {
+          const series = getSeries(sec.s, p, g.d);
+          const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+          if (!vals.length) return;
+          const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+          const lim = getLimit(sec.s, p);
+          let bc = 0;
+          if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
+          const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
+          const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
+          const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
+          const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
+          html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:10px 14px;min-width:130px;flex:1;max-width:200px;cursor:pointer"
+            onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p}</div>
+            <div style="font-size:18px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
+            ${lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:3px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9.5px;color:#444;margin-top:3px">— không ngưỡng</div>'}
+            ${lim && bc > 0 ? `<div style="font-size:9.5px;color:#f7774f;margin-top:2px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
+            ${lim && bc === 0 ? `<div style="font-size:9.5px;color:#4fc9a4;margin-top:2px">✓ ${vals.length} điểm</div>` : ''}
+            ${!lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:2px">n = ${vals.length}</div>` : ''}
+          </div>`;
+        });
+        html += `</div>`;
+      });
+    }
 
     html += `</div></div>`;
   });
