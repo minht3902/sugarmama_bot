@@ -116,13 +116,19 @@
   select:hover { border-color:var(--c1); }
   ::-webkit-scrollbar{width:5px;height:5px;}
   ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+  .bfbtn {
+    background:var(--surface2); border:1px solid var(--border); color:var(--muted);
+    padding:3px 9px; border-radius:6px; font-size:10.5px; cursor:pointer;
+    font-family:inherit; transition:all .15s;
+  }
+  .bfbtn:hover { border-color:var(--c1); color:var(--text); }
+  .bfbtn.active { background:rgba(79,142,247,.15); border-color:var(--c1); color:#fff; }
 </style>
 </head>
 <body>
 <header>
   <div class="header-left">
-    <h1>📊 Dashboard Kiểm Soát Dây Chuyền</h1>
-    <p>Tháng 12/2025 &nbsp;·&nbsp; Hóa chế thô &amp; Nấu đường – Mía – Mật rỉ &nbsp;·&nbsp; Đường đứt nét = ngưỡng kiểm soát</p>
+    <h1>📊 Dashboard Kiểm Soát Dây Chuyền &nbsp;<span style="font-size:12px;font-weight:400;color:var(--muted)">Tháng 12/2025</span></h1>
   </div>
   <div class="header-right">
     <div class="date-filter">
@@ -133,10 +139,6 @@
       <button class="btn-reset" onclick="resetFilter()">✕ Reset</button>
     </div>
     <span class="chip-pts" id="pointChip">— ĐIỂM ĐO</span>
-    <select id="displayMode" onchange="renderAll()">
-      <option value="line">📈 Đường</option>
-      <option value="bar">📊 Cột</option>
-    </select>
   </div>
 </header>
 <div class="tabs">
@@ -211,19 +213,21 @@ function getSeries(section, param, dataset) {
 }
 function calcStats(series, lim) {
   const clean = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
-  if (!clean.length) return {min:'N/A',max:'N/A',avg:'N/A',last:'N/A',trend:'flat',breachCount:0};
+  if (!clean.length) return {min:'N/A',max:'N/A',avg:'N/A',last:'N/A',trend:'flat',breachCount:0,aboveCount:0,belowCount:0,total:0};
   const avg = (clean.reduce((a,b)=>a+b,0)/clean.length).toFixed(2);
   const min = Math.min(...clean).toFixed(2);
   const max = Math.max(...clean).toFixed(2);
   const last = clean[clean.length-1].toFixed(2);
   const prev = clean.length>1 ? clean[clean.length-2] : clean[0];
   const trend = clean[clean.length-1]>prev+0.01?'up':clean[clean.length-1]<prev-0.01?'down':'flat';
-  let breachCount = 0;
-  if (lim) clean.forEach(v=>{ if(v<lim.lo||v>lim.hi) breachCount++; });
-  return {min,max,avg,last,trend,breachCount};
+  let breachCount=0, aboveCount=0, belowCount=0;
+  if (lim) clean.forEach(v=>{
+    if (v > lim.hi) { breachCount++; aboveCount++; }
+    else if (v < lim.lo) { breachCount++; belowCount++; }
+  });
+  return {min,max,avg,last,trend,breachCount,aboveCount,belowCount,total:clean.length};
 }
 function makeChart(id, seriesList, section, singleParam) {
-  const mode = document.getElementById('displayMode').value;
   const ctx = document.getElementById(id);
   if (!ctx) return;
   if (charts[id]) { charts[id].destroy(); delete charts[id]; }
@@ -253,11 +257,11 @@ function makeChart(id, seriesList, section, singleParam) {
     return {
       label, data,
       borderColor: col,
-      backgroundColor: mode==='bar' ? col+'bb' : col+'20',
+      backgroundColor: col+'20',
       borderWidth: 2,
       pointRadius: data.map(v => v !== null ? 2.5 : 0),
       pointHoverRadius: 5,
-      tension: 0.3, fill: mode==='line' && seriesList.length===1,
+      tension: 0.3, fill: seriesList.length===1,
       spanGaps: true, order: 1,
       pointBackgroundColor: data.map(v => {
         if (v===null) return 'transparent';
@@ -268,7 +272,7 @@ function makeChart(id, seriesList, section, singleParam) {
     };
   }));
   charts[id] = new Chart(ctx, {
-    type: mode==='bar' ? 'bar' : 'line',
+    type: 'line',
     data: { labels, datasets: [...ds, ...limitDs] },
     options: {
       responsive:true, maintainAspectRatio:false,
@@ -309,23 +313,66 @@ function cardHtml(id, title, section, param, dataset) {
   const tIcon = s.trend==='up'?'▲':s.trend==='down'?'▼':'—';
   const lastNum = parseFloat(s.last);
   const inRange = lim ? (lastNum>=lim.lo && lastNum<=lim.hi) : null;
+  const pct = (s.total>0 && lim) ? ((s.breachCount/s.total)*100).toFixed(1) : null;
   const badges = `<div class="card-badges">
     <span class="cbadge">${section}</span>
     ${lim ? `<span class="cbadge limit-badge">↕ ${lim.lo}–${lim.hi}</span>` : ''}
-    ${lim && s.breachCount>0 ? `<span class="cbadge" style="background:rgba(247,119,79,.2);color:#f7774f;border:1px solid rgba(247,119,79,.3)">⚠️ ${s.breachCount} lệch</span>` : ''}
+    ${lim && s.breachCount>0 ? `
+      <span class="cbadge breach-badge" style="background:rgba(247,119,79,.2);color:#f7774f;border:1px solid rgba(247,119,79,.3);cursor:pointer"
+        onclick="toggleBreachFilter(event,'${id}','${section}','${param}','${dataset}')">
+        ⚠️ ${s.breachCount} lệch (${pct}%) ▾
+      </span>` : ''}
     ${lim && s.breachCount===0 && series.length>0 ? `<span class="cbadge" style="background:rgba(79,201,164,.12);color:#4fc9a4;border:1px solid rgba(79,201,164,.25)">✓ Đạt chuẩn</span>` : ''}
   </div>`;
   const lastClass = lim ? (inRange ? 'ok' : 'breach') : '';
-  return `<div class="chart-card">
+  const breachStat = lim ? `<div class="stat-item ${s.breachCount>0?'breach':'ok'}"><div class="stat-val">${s.breachCount}/${s.total}</div><div class="stat-lbl">Lệch/Tổng ${pct?pct+'%':''}</div></div>` : '';
+  return `<div class="chart-card" id="card_${id}">
     <div class="card-top"><div class="card-title">${title}</div>${badges}</div>
+    <div id="bfilter_${id}" style="display:none;padding:4px 0 8px;display:none">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="bfbtn active" data-card="${id}" data-mode="all" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">Tất cả</button>
+        <button class="bfbtn" data-card="${id}" data-mode="above" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▲ Vượt cận trên (${s.aboveCount})</button>
+        <button class="bfbtn" data-card="${id}" data-mode="below" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▼ Dưới cận dưới (${s.belowCount})</button>
+        <button class="bfbtn" data-card="${id}" data-mode="breach" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">⚠️ Chỉ điểm lệch (${s.breachCount})</button>
+      </div>
+    </div>
     <div class="chart-wrap"><canvas id="${id}"></canvas></div>
     <div class="stat-row">
       <div class="stat-item"><div class="stat-val">${s.avg}</div><div class="stat-lbl">Trung bình</div></div>
       <div class="stat-item"><div class="stat-val" style="color:#4fc9a4">${s.min}</div><div class="stat-lbl">Min</div></div>
       <div class="stat-item"><div class="stat-val" style="color:#f7774f">${s.max}</div><div class="stat-lbl">Max</div></div>
       <div class="stat-item ${lastClass}"><div class="stat-val ${s.trend}">${tIcon} ${s.last}</div><div class="stat-lbl">Gần nhất ${lim?(inRange?'✓':'⚠️'):''}</div></div>
+      ${breachStat}
     </div>
   </div>`;
+}
+function toggleBreachFilter(evt, id, section, param, dataset) {
+  evt.stopPropagation();
+  const panel = document.getElementById('bfilter_' + id);
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+  panel.style.flexDirection = 'column';
+}
+function setBreachMode(btn, id, section, param, dataset) {
+  // Update button active state
+  btn.closest('[id^="bfilter_"]').querySelectorAll('.bfbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const mode = btn.dataset.mode;
+  const rawSeries = getSeries(section, param, dataset);
+  const lim = getLimit(section, param);
+  let filtered;
+  if (mode === 'all' || !lim) {
+    filtered = rawSeries;
+  } else if (mode === 'above') {
+    filtered = rawSeries.filter(pt => pt.v !== null && pt.v > lim.hi);
+  } else if (mode === 'below') {
+    filtered = rawSeries.filter(pt => pt.v !== null && pt.v < lim.lo);
+  } else if (mode === 'breach') {
+    filtered = rawSeries.filter(pt => pt.v !== null && (pt.v > lim.hi || pt.v < lim.lo));
+  } else {
+    filtered = rawSeries;
+  }
+  makeChart(id, [{label: param, series: filtered}], section, param);
 }
 function renderCardChart(id, section, param, dataset) {
   const series = getSeries(section, param, dataset);
@@ -341,61 +388,141 @@ function legendBar() {
 }
 function renderOverview() {
   const mc = document.getElementById('mainContent');
+
+  // Danh sách ĐẦY ĐỦ tất cả thông số — kể cả không có ngưỡng
   const kpiList = [
-    {s:'Syrup sau lắng nổi',p:'Ap',d:'hoa',c:'#4f8ef7'},
-    {s:'Syrup sau lắng nổi',p:'Độ màu',d:'hoa',c:'#f7c34f'},
-    {s:'Syrup trước lắng nổi',p:'Bx',d:'hoa',c:'#4fc9a4'},
-    {s:'Syrup trước lắng nổi',p:'pH',d:'hoa',c:'#f7c34f'},
-    {s:'Nước chè trong 2',p:'Độ màu',d:'hoa',c:'#f7c34f'},
-    {s:'Nước chè trong 2',p:'Độ đục (IU)',d:'hoa',c:'#b44ff7'},
-    {s:'Nước chè trong 2',p:'pH',d:'hoa',c:'#f7c34f'},
-    {s:'Sirô thô sau bốc hơi',p:'Bx',d:'hoa',c:'#4f8ef7'},
-    {s:'Đường non A',p:'Ap',d:'nau',c:'#4f8ef7'},
-    {s:'Đường non A',p:'Bx',d:'nau',c:'#4fc9a4'},
-    {s:'Đường non B',p:'Ap',d:'nau',c:'#4f8ef7'},
-    {s:'Đường non B',p:'Bx',d:'nau',c:'#4fc9a4'},
-    {s:'Đường non C',p:'Ap',d:'nau',c:'#4f8ef7'},
-    {s:'Mật nguyên A',p:'Ap',d:'nau',c:'#f7774f'},
-    {s:'Mật B',p:'Ap',d:'nau',c:'#f7774f'},
-    {s:'Đường B',p:'Pol',d:'nau',c:'#4fc9a4'},
-    {s:'Hồi dung C',p:'Ap',d:'nau',c:'#4f8ef7'},
-    {s:'Hồi dung C',p:'Bx',d:'nau',c:'#4fc9a4'},
-    {s:'Pol bã',p:'Pol bã',d:'mia',c:'#4f8ef7'},
-    {s:'Ẩm bã',p:'Ẩm bã',d:'mia',c:'#4fc9a4'},
-    {s:'Bx mật cuối',p:'Bx mật cuối',d:'matri',c:'#f7c34f'},
-    {s:'Ap mật rỉ',p:'Ap mật rỉ',d:'matri',c:'#f7774f'},
+    {s:'Syrup sau lắng nổi',   p:'Ap',         d:'hoa', c:'#4f8ef7'},
+    {s:'Syrup sau lắng nổi',   p:'Bx',         d:'hoa', c:'#4fc9a4'},
+    {s:'Syrup sau lắng nổi',   p:'Pol',        d:'hoa', c:'#b44ff7'},
+    {s:'Syrup sau lắng nổi',   p:'pH',         d:'hoa', c:'#f7c34f'},
+    {s:'Syrup sau lắng nổi',   p:'Độ màu',     d:'hoa', c:'#f7774f'},
+    {s:'Syrup trước lắng nổi', p:'Bx',         d:'hoa', c:'#4fc9a4'},
+    {s:'Syrup trước lắng nổi', p:'pH',         d:'hoa', c:'#f7c34f'},
+    {s:'Syrup trước lắng nổi', p:'Độ màu',     d:'hoa', c:'#f7774f'},
+    {s:'Nước chè trong 2',     p:'Ap',         d:'hoa', c:'#4f8ef7'},
+    {s:'Nước chè trong 2',     p:'Bx',         d:'hoa', c:'#4fc9a4'},
+    {s:'Nước chè trong 2',     p:'Pol',        d:'hoa', c:'#b44ff7'},
+    {s:'Nước chè trong 2',     p:'pH',         d:'hoa', c:'#f7c34f'},
+    {s:'Nước chè trong 2',     p:'Độ màu',     d:'hoa', c:'#f7774f'},
+    {s:'Nước chè trong 2',     p:'Độ đục (IU)',d:'hoa', c:'#b44ff7'},
+    {s:'Sirô thô sau bốc hơi', p:'Ap',         d:'hoa', c:'#4f8ef7'},
+    {s:'Sirô thô sau bốc hơi', p:'Bx',         d:'hoa', c:'#4fc9a4'},
+    {s:'Sirô thô sau bốc hơi', p:'Pol',        d:'hoa', c:'#b44ff7'},
+    {s:'Sirô thô sau bốc hơi', p:'pH',         d:'hoa', c:'#f7c34f'},
+    {s:'Sirô thô sau bốc hơi', p:'Độ màu',     d:'hoa', c:'#f7774f'},
+    {s:'Đường non A',   p:'Ap',  d:'nau', c:'#4f8ef7'},
+    {s:'Đường non A',   p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Đường non A',   p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Đường non B',   p:'Ap',  d:'nau', c:'#4f8ef7'},
+    {s:'Đường non B',   p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Đường non B',   p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Đường non C',   p:'Ap',  d:'nau', c:'#4f8ef7'},
+    {s:'Đường non C',   p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Đường non C',   p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Đường B',       p:'Ap',  d:'nau', c:'#4f8ef7'},
+    {s:'Đường B',       p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Đường B',       p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Đường C',       p:'Ap',  d:'nau', c:'#4f8ef7'},
+    {s:'Đường C',       p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Đường C',       p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Mật nguyên A',  p:'Ap',  d:'nau', c:'#f7774f'},
+    {s:'Mật nguyên A',  p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Mật nguyên A',  p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Mật loãng A',   p:'Ap',  d:'nau', c:'#f7774f'},
+    {s:'Mật loãng A',   p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Mật loãng A',   p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Mật B',         p:'Ap',  d:'nau', c:'#f7774f'},
+    {s:'Mật B',         p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Mật B',         p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Hồi dung B',    p:'Ap',  d:'nau', c:'#4f8ef7'},
+    {s:'Hồi dung B',    p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Hồi dung B',    p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Hồi dung B',    p:'Độ màu',d:'nau',c:'#f7774f'},
+    {s:'Hồi dung C',    p:'Ap',  d:'nau', c:'#4f8ef7'},
+    {s:'Hồi dung C',    p:'Bx',  d:'nau', c:'#4fc9a4'},
+    {s:'Hồi dung C',    p:'Pol', d:'nau', c:'#b44ff7'},
+    {s:'Hồi dung C',    p:'Độ màu',d:'nau',c:'#f7774f'},
+    {s:'Pol bã',        p:'Pol bã',       d:'mia', c:'#4f8ef7'},
+    {s:'Ẩm bã',         p:'Ẩm bã',        d:'mia', c:'#4fc9a4'},
+    {s:'Xơ mía',        p:'Xơ mía',       d:'mia', c:'#f7c34f'},
+    {s:'pH gia vôi NM HH',p:'pH gia vôi NM HH',d:'mia',c:'#f7c34f'},
+    {s:'pH NM trung hòa', p:'pH NM trung hòa', d:'mia',c:'#4fc9a4'},
+    {s:'Ap NM HH',      p:'Ap NM HH',     d:'mia', c:'#4f8ef7'},
+    {s:'Bx NM HH',      p:'Bx NM HH',     d:'mia', c:'#4fc9a4'},
+    {s:'Pol NM HH',     p:'Pol NM HH',    d:'mia', c:'#b44ff7'},
+    {s:'Ap NM đầu',     p:'Ap NM đầu',    d:'mia', c:'#4f8ef7'},
+    {s:'Bx NM đầu',     p:'Bx NM đầu',    d:'mia', c:'#4fc9a4'},
+    {s:'Pol NM đầu',    p:'Pol NM đầu',   d:'mia', c:'#b44ff7'},
+    {s:'Ap NM cuối',    p:'Ap NM cuối',   d:'mia', c:'#4f8ef7'},
+    {s:'Bx NM cuối',    p:'Bx NM cuối',   d:'mia', c:'#4fc9a4'},
+    {s:'Pol NM cuối',   p:'Pol NM cuối',  d:'mia', c:'#b44ff7'},
+    {s:'P2O5',          p:'P2O5',         d:'mia', c:'#f7c34f'},
+    {s:'Pol bùn',       p:'Pol bùn',      d:'matri',c:'#4f8ef7'},
+    {s:'Độ ẩm bùn',     p:'Độ ẩm bùn',   d:'matri',c:'#4fc9a4'},
+    {s:'Ap mật cuối',   p:'Ap mật cuối',  d:'matri',c:'#f7774f'},
+    {s:'Bx mật cuối',   p:'Bx mật cuối',  d:'matri',c:'#f7c34f'},
+    {s:'Pol mật cuối',  p:'Pol mật cuối', d:'matri',c:'#b44ff7'},
+    {s:'RS mật cuối',   p:'RS mật cuối',  d:'matri',c:'#4ff7d8'},
+    {s:'Ap mật rỉ',     p:'Ap mật rỉ',    d:'matri',c:'#f7774f'},
+    {s:'Bx mật rỉ',     p:'Bx mật rỉ',    d:'matri',c:'#f7c34f'},
+    {s:'Bx1 mật rỉ',    p:'Bx1 mật rỉ',   d:'matri',c:'#4fc9a4'},
+    {s:'Pol mật rỉ',    p:'Pol mật rỉ',   d:'matri',c:'#b44ff7'},
   ];
-  function calcFilteredStats(d, s, p) {
-    // Tính stats real-time từ filtered series (theo filterFrom/filterTo hiện tại)
-    const series = getSeries(s, p, d);
-    const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
-    if (!vals.length) return null;
-    const mean = vals.reduce((a,b)=>a+b,0) / vals.length;
-    const std  = Math.sqrt(vals.reduce((a,b)=>a+(b-mean)**2,0) / vals.length);
-    return { mean: parseFloat(mean.toFixed(2)), std: parseFloat(std.toFixed(2)) };
-  }
-  const dateLabel = filterFrom === filterTo
-    ? filterFrom
-    : filterFrom + ' → ' + filterTo;
-  let kpiHtml = `<div class="section-header"><span class="dot" style="background:#4f8ef7"></span><span class="section-title">Chỉ số có ngưỡng kiểm soát – Trung bình ${dateLabel}</span></div><div class="kpi-grid">`;
-  kpiList.forEach(k=>{
+
+  const dateLabel = filterFrom === filterTo ? filterFrom : filterFrom + ' → ' + filterTo;
+
+  // Tính breach summary tổng
+  let totalBreach = 0, totalPts = 0, withLimCount = 0, withLimBreach = 0;
+  const groups = {};
+
+  kpiList.forEach(k => {
+    const series = getSeries(k.s, k.p, k.d);
+    if (!series.length) return;
     const lim = getLimit(k.s, k.p);
-    const ms = calcFilteredStats(k.d, k.s, k.p);
-    if (!ms || ms.mean === null) return;
-    const mean = ms.mean;
-    const std = ms.std;
-    const inRange = lim ? (mean>=lim.lo && mean<=lim.hi) : null;
-    const breachClass = lim ? (inRange?'ok-card':'breach') : '';
-    kpiHtml += `<div class="kpi-card ${breachClass}">
-      <div class="kpi-section">${k.s}</div>
-      <div class="kpi-param">${k.p}</div>
-      <div class="kpi-val" style="color:${inRange===false?'#f7774f':inRange===true?'#4fc9a4':k.c}">${mean.toFixed(2)}</div>
-      ${lim?`<div class="kpi-range">Ngưỡng: ${lim.lo}–${lim.hi} ${inRange===false?'⚠️':'✓'}</div>`:''}
-      <div class="kpi-trend flat">σ: ${std.toFixed(2)}</div>
-    </div>`;
+    const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+    if (!vals.length) return;
+    const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+    let bc=0, ac=0, blc=0;
+    if (lim) vals.forEach(v=>{ if(v>lim.hi){bc++;ac++;} else if(v<lim.lo){bc++;blc++;} });
+    totalPts += vals.length;
+    if (lim) { totalBreach += bc; withLimCount += vals.length; withLimBreach += bc; }
+
+    if (!groups[k.s]) groups[k.s] = [];
+    groups[k.s].push({...k, mean:parseFloat(mean.toFixed(2)), lim, bc, ac, blc, total:vals.length});
   });
-  kpiHtml += '</div>';
-  mc.innerHTML = kpiHtml;
+
+  const pctOverall = withLimCount>0 ? ((withLimBreach/withLimCount)*100).toFixed(1) : '—';
+
+  let html = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
+      <div class="chip-pts" style="font-size:11px;padding:6px 14px">📍 ${totalPts} điểm đo tổng</div>
+      <div class="chip-pts" style="font-size:11px;padding:6px 14px;background:rgba(247,119,79,.1);border-color:rgba(247,119,79,.3);color:#f7774f">
+        ⚠️ ${withLimBreach}/${withLimCount} lệch ngưỡng (${pctOverall}%)
+      </div>
+      <div class="chip-pts" style="font-size:11px;padding:6px 14px;color:var(--muted)">📅 ${dateLabel}</div>
+    </div>
+    <div class="section-header"><span class="dot" style="background:#4f8ef7"></span><span class="section-title">Tất cả thông số – Trung bình kỳ</span></div>`;
+
+  // Render từng group (section)
+  Object.entries(groups).forEach(([sec, items]) => {
+    html += `<div class="section-group"><div class="sub-label">${sec}</div><div class="kpi-grid">`;
+    items.forEach(k => {
+      const inRange = k.lim ? (k.mean >= k.lim.lo && k.mean <= k.lim.hi) : null;
+      const breachClass = k.lim ? (inRange ? 'ok-card' : 'breach') : '';
+      const pct = (k.total>0 && k.lim) ? ((k.bc/k.total)*100).toFixed(1) : null;
+      html += `<div class="kpi-card ${breachClass}">
+        <div class="kpi-param">${k.p}</div>
+        <div class="kpi-val" style="color:${inRange===false?'#f7774f':inRange===true?'#4fc9a4':k.c}">${k.mean.toFixed(2)}</div>
+        ${k.lim ? `<div class="kpi-range">Ngưỡng: ${k.lim.lo}–${k.lim.hi} ${inRange===false?'⚠️':'✓'}</div>` : '<div class="kpi-range" style="color:#555">— Không có ngưỡng</div>'}
+        ${k.lim && k.bc>0 ? `<div style="font-size:10px;color:#f7774f;margin-top:3px">⚠️ ${k.bc}/${k.total} lệch (${pct}%)</div>` : ''}
+        ${k.lim && k.bc===0 ? `<div style="font-size:10px;color:#4fc9a4;margin-top:3px">✓ ${k.total} điểm đạt chuẩn</div>` : ''}
+        ${!k.lim ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">n = ${k.total}</div>` : ''}
+      </div>`;
+    });
+    html += '</div></div>';
+  });
+
+  mc.innerHTML = html;
 }
 function renderSingle(section, dataset, params, color) {
   const mc = document.getElementById('mainContent');
