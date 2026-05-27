@@ -35,6 +35,7 @@ GITHUB_CFG_REPO = "sugarmama_config"
 GITHUB_API      = "https://api.github.com"
 
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/main"
+CACHE_URL       = f"{GITHUB_RAW_BASE}/cache.json"
 DASHBOARD_URL   = f"{GITHUB_RAW_BASE}/dashboard.html"
 
 BOT_START_TIME  = now_vn()  # Ghi nhận lúc bot khởi động
@@ -56,6 +57,8 @@ def load_allowed_users() -> list[int]:
         import base64
         content = base64.b64decode(r.json()["content"]).decode("utf-8")
         users = json.loads(content)
+        if isinstance(users, int):
+            users = [users]
         return [int(u) for u in users]
     except Exception as e:
         print(f"[LOAD USERS ERROR] {e}")
@@ -89,6 +92,12 @@ def save_allowed_users(users: list[int]) -> bool:
 _ALLOWED_USERS = load_allowed_users()
 print(f"✅ Loaded {len(_ALLOWED_USERS)} allowed users: {_ALLOWED_USERS}")
 
+# Dict lưu các yêu cầu đang chờ duyệt: {uid: {"name": str, "username": str}}
+_PENDING: dict[int, dict] = {}
+
+# Lệnh chỉ admin mới dùng được
+ADMIN_ONLY_CMDS = {"newcache", "update", "remove_user"}
+
 # ========================
 # NGƯỠNG CHUẨN
 # ========================
@@ -118,9 +127,13 @@ LIMITS = {
 
 # Tra ngưỡng nhanh theo (section, param)
 def get_limit(section, param):
-    """Trả về {'lo':..,'hi':..} hoặc None nếu không có ngưỡng."""
+    """Trả về {'lo':..,'hi':..} hoặc None."""
     if section in LIMITS and param in LIMITS[section]:
         return LIMITS[section][param]
+    # Fallback: tìm theo param trong tất cả sections
+    for lim_section, params in LIMITS.items():
+        if param in params:
+            return params[param]
     return None
 
 # Map từ COMMAND_MAP key → (section dùng để tra LIMITS, param)
@@ -289,6 +302,8 @@ NAU_MAP_KEYS = {
 # cache_FROM_TO.json : dữ liệu cũ do /newcache tạo
 #   ví dụ: cache_2024-12-01_2024-12-31.json
 
+import re as _re_cache
+
 def _fetch_json(url: str):
     """Tải JSON từ URL, trả về (data, error)."""
     try:
@@ -298,145 +313,147 @@ def _fetch_json(url: str):
     except Exception as e:
         return None, str(e)
 
-def _load_cache_safe():
-    """Tải file cache mới nhất (cache_YYYY-MM-DD_YYYY-MM-DD.json), trả về (cache_dict, error_str)."""
-    try:
-        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/contents/"
-        r = requests.get(url, headers=_gh_headers(), timeout=15)
-        r.raise_for_status()
-        import re as _re
-        files = [
-            f["name"] for f in r.json()
-            if _re.match(r'^cache_\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.json$', f["name"])
-        ]
-        if not files:
-            return None, "Không tìm thấy file cache nào trong repo."
-        latest = sorted(files, key=lambda x: x.split('_')[2].replace('.json', ''))[-1]  # sort theo to_date
-        raw_url = f"{GITHUB_RAW_BASE}/{latest}"
-        return _fetch_json(raw_url)
-    except Exception as e:
-        return None, str(e)
-
-def _list_old_caches() -> list[dict]:
+def _list_all_caches() -> list[dict]:
     """
-    Liệt kê các file cache_*.json trong repo qua GitHub API.
-    Trả về list[{"name": str, "from": str, "to": str, "url": str}]
+    Gọi GitHub API MỘT LẦN DUY NHẤT, trả về list tất cả cache_*.json
+    được sắp xếp theo from_date tăng dần.
+    Trả về list[{"name", "from", "to", "url"}].
+    Nếu API lỗi → trả về list rỗng (caller tự xử lý fallback).
     """
     try:
         url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/contents/"
-        r = requests.get(url, headers=_gh_headers(), timeout=15)
+        r = requests.get(url, timeout=15)
         r.raise_for_status()
         files = r.json()
-        result = []
-        import re as _re
-        for f in files:
-            m = _re.match(r'^cache_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.json$', f["name"])
-            if m:
-                result.append({
-                    "name": f["name"],
-                    "from": m.group(1),
-                    "to":   m.group(2),
-                    "url":  f"{GITHUB_RAW_BASE}/{f['name']}"
-                })
-        return sorted(result, key=lambda x: x["from"])
     except Exception as e:
-        print(f"[LIST CACHES ERROR] {e}")
+        print(f"[LIST CACHES ERROR] {e}", flush=True)
         return []
+
+    result = []
+    for f in files:
+        m = _re_cache.match(
+            r'^cache_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.json$',
+            f["name"]
+        )
+        if m:
+            result.append({
+                "name": f["name"],
+                "from": m.group(1),
+                "to":   m.group(2),
+                "url":  f"{GITHUB_RAW_BASE}/{f['name']}",
+            })
+    return sorted(result, key=lambda x: x["from"])
+
+def _load_cache_safe():
+    """
+    Tải cache mới nhất (to_date lớn nhất) từ repo.
+    Gọi GitHub API 1 lần → chọn file phù hợp → fetch JSON.
+    Trả về (cache_dict, error_str).
+    """
+    all_caches = _list_all_caches()
+    if not all_caches:
+        # Fallback: thử cache.json cố định (legacy)
+        return _fetch_json(CACHE_URL)
+
+    # Lấy file có to_date lớn nhất, nếu bằng nhau thì from_date lớn hơn
+    best = sorted(all_caches, key=lambda x: (x["to"], x["from"]), reverse=True)[0]
+    print(f"[CACHE] Dùng: {best['name']} ({best['from']} → {best['to']})", flush=True)
+    return _fetch_json(best["url"])
 
 def _find_cache_for_range(from_d: str, to_d: str):
     """
     Tìm cache phù hợp cho khoảng [from_d, to_d].
     Trả về (cache_dict, source_label, error_str).
-    Logic:
-      1. Thử cache.json chính trước
-      2. Nếu khoảng nằm ngoài cache chính → tìm cache_*.json
-      3. Nếu khoảng trải dài qua nhiều cache → merge
-      4. Nếu không đủ dữ liệu → trả thông báo rõ ràng
+
+    Gọi GitHub API ĐÚNG 1 LẦN qua _list_all_caches(), sau đó:
+      1. Nếu 1 file cover đủ [from_d, to_d] → dùng luôn (ưu tiên file mới nhất)
+      2. Nếu cần nhiều file → merge
+      3. Nếu không có file nào overlap → báo lỗi + gợi ý
     """
-    # Bước 1: load cache chính
-    main_cache, err = _load_cache_safe()
+    def _range_covered(entry, fd, td):
+        return entry["from"] <= fd and td <= entry["to"]
 
-    def _range_covered(cache, fd, td):
-        """Kiểm tra cache có chứa dữ liệu cho khoảng [fd, td] không."""
-        if not cache:
-            return False
-        cf = cache.get("from_date", "9999-99-99")
-        ct = cache.get("to_date",   "0000-00-00")
-        return cf <= fd and td <= ct
+    all_caches = _list_all_caches()  # 1 lần API duy nhất
 
-    # Nếu cache chính đủ → dùng luôn
-    if main_cache and _range_covered(main_cache, from_d, to_d):
-        return main_cache, "cache hiện tại", None
+    if not all_caches:
+        # API lỗi hoàn toàn → thử fallback cache.json
+        data, err = _fetch_json(CACHE_URL)
+        if err:
+            return None, None, f"⚠️ Không kết nối được GitHub: `{err}`"
+        if data and _range_covered(
+            {"from": data.get("from_date","9999"), "to": data.get("to_date","0000")},
+            from_d, to_d
+        ):
+            return data, "cache.json", None
+        return None, None, "⚠️ Không tìm được cache phù hợp."
 
-    # Bước 2: tìm trong cache cũ
-    old_caches = _list_old_caches()
+    # Bước 1: tìm file nào cover đủ khoảng yêu cầu
+    covering = [c for c in all_caches if _range_covered(c, from_d, to_d)]
+    if covering:
+        # Ưu tiên file mới nhất (to_date lớn nhất)
+        best = sorted(covering, key=lambda x: (x["to"], x["from"]), reverse=True)[0]
+        data, err = _fetch_json(best["url"])
+        if err:
+            return None, None, f"⚠️ Không tải được `{best['name']}`: `{err}`"
+        return data, best["name"], None
 
-    # Bước 3: gom tất cả cache có overlap với [from_d, to_d]
-    candidates = []
-    if main_cache and not err:
-        cf = main_cache.get("from_date", "9999")
-        ct = main_cache.get("to_date",   "0000")
-        if cf <= to_d and ct >= from_d:  # có overlap
-            candidates.append((cf, ct, main_cache, "cache hiện tại"))
+    # Bước 2: không có file đơn lẻ cover đủ → tìm các file có overlap
+    overlapping = [
+        c for c in all_caches
+        if c["from"] <= to_d and c["to"] >= from_d
+    ]
 
-    for oc in old_caches:
-        if oc["from"] <= to_d and oc["to"] >= from_d:  # có overlap
-            data, e = _fetch_json(oc["url"])
-            if data:
-                candidates.append((oc["from"], oc["to"], data, oc["name"]))
-
-    if not candidates:
-        # Tìm xem có cache nào gần nhất không để gợi ý
-        all_ranges = [(oc["from"], oc["to"]) for oc in old_caches]
-        if main_cache:
-            all_ranges.append((main_cache.get("from_date","?"), main_cache.get("to_date","?")))
-        hint = ""
-        if all_ranges:
-            hint = "\n📦 Cache hiện có:\n" + "\n".join(f"  • `{f}` → `{t}`" for f, t in sorted(all_ranges))
+    if not overlapping:
+        hint = "\n📦 Cache hiện có:\n" + "\n".join(
+            f"  • `{c['from']}` → `{c['to']}`" for c in all_caches
+        )
         return None, None, (
             f"⚠️ Chưa có dữ liệu cho khoảng `{_fmt_date(from_d)}` → `{_fmt_date(to_d)}`.\n"
             f"Dùng `/newcache {_fmt_date(from_d)} - {_fmt_date(to_d)}` để tạo cache rồi gọi lại lệnh."
             + hint
         )
 
-    # Bước 4: nếu chỉ 1 candidate → dùng luôn
-    if len(candidates) == 1:
-        _, _, data, label = candidates[0]
-        return data, label, None
-
-    # Bước 5: merge raw data từ nhiều cache
+    # Bước 3: merge tất cả file có overlap
     merged_raw = {}
-    labels = []
-    for _, _, data, label in sorted(candidates, key=lambda x: x[0]):
-        labels.append(label)
+    labels     = []
+    from_dates = []
+    to_dates   = []
+
+    for oc in sorted(overlapping, key=lambda x: x["from"]):
+        data, err = _fetch_json(oc["url"])
+        if not data:
+            print(f"[MERGE] Bỏ qua {oc['name']}: {err}", flush=True)
+            continue
+        labels.append(oc["name"])
+        from_dates.append(oc["from"])
+        to_dates.append(oc["to"])
         raw = data.get("raw", {})
         for group in ("mia", "mat", "hoa", "nau"):
             if group not in raw:
                 continue
-            if group not in merged_raw:
-                merged_raw[group] = {}
+            merged_raw.setdefault(group, {})
             grp = raw[group]
             if group in ("mia", "mat"):
                 for key, series in grp.items():
-                    if key not in merged_raw[group]:
-                        merged_raw[group][key] = []
+                    merged_raw[group].setdefault(key, [])
                     existing_ts = {pt["t"] for pt in merged_raw[group][key]}
                     merged_raw[group][key] += [pt for pt in series if pt["t"] not in existing_ts]
                     merged_raw[group][key].sort(key=lambda x: x["t"])
-            else:  # hoa, nau — nested dict
+            else:
                 for section, params in grp.items():
-                    if section not in merged_raw[group]:
-                        merged_raw[group][section] = {}
+                    merged_raw[group].setdefault(section, {})
                     for param, series in params.items():
-                        if param not in merged_raw[group][section]:
-                            merged_raw[group][section][param] = []
+                        merged_raw[group][section].setdefault(param, [])
                         existing_ts = {pt["t"] for pt in merged_raw[group][section][param]}
                         merged_raw[group][section][param] += [pt for pt in series if pt["t"] not in existing_ts]
                         merged_raw[group][section][param].sort(key=lambda x: x["t"])
 
+    if not labels:
+        return None, None, "⚠️ Tải cache thất bại hoàn toàn."
+
     merged_cache = {
-        "from_date":  min(c[0] for c in candidates),
-        "to_date":    max(c[1] for c in candidates),
+        "from_date":  min(from_dates),
+        "to_date":    max(to_dates),
         "updated_at": now_vn().strftime("%Y-%m-%d %H:%M:%S"),
         "raw":        merged_raw,
     }
@@ -482,16 +499,29 @@ def _parse_date_arg(arg):
 
     def _parse_one(s):
         s = s.strip()
-        now_y = now_vn().year
-        for fmt in ("%d/%m/%Y", "%d/%m"):
-            try:
-                dt = datetime.strptime(s, fmt)
-                if fmt == "%d/%m":
-                    dt = dt.replace(year=now_y)
-                return dt.strftime("%Y-%m-%d")
-            except ValueError:
-                continue
-        raise ValueError(f"Không nhận ra định dạng ngày: '{s}'. Dùng DD/MM hoặc DD/MM/YYYY.")
+        # Có năm rõ ràng → dùng thẳng
+        try:
+            dt = datetime.strptime(s, "%d/%m/%Y")
+            return dt.strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+        # Không có năm → suy ra năm thông minh theo vụ ép
+        try:
+            dt_no_year = datetime.strptime(s, "%d/%m")
+        except ValueError:
+            raise ValueError(f"Không nhận ra định dạng ngày: '{s}'. Dùng DD/MM hoặc DD/MM/YYYY.")
+        now = now_vn()
+        # Thử năm hiện tại trước
+        candidate = dt_no_year.replace(year=now.year)
+        # Nếu tháng >= 10 (tháng đầu vụ ép) và hiện tại đang trong năm tiếp theo (tháng <= 9)
+        # thì ngày đó thuộc năm trước
+        if dt_no_year.month >= 10 and now.month <= 9:
+            candidate = dt_no_year.replace(year=now.year - 1)
+        # Nếu tháng <= 9 (nửa sau vụ ép) và hiện tại đang ở tháng >= 10
+        # thì ngày đó thuộc năm sau
+        elif dt_no_year.month <= 9 and now.month >= 10:
+            candidate = dt_no_year.replace(year=now.year + 1)
+        return candidate.strftime("%Y-%m-%d")
 
     import re as _re
     range_match = _re.match(r'^(.+?)\s*-\s*(.+)$', arg)
@@ -606,12 +636,21 @@ def _format_summary_section(raw, section_name, section_key, items, from_d, to_d)
             label = item if isinstance(item, str) else item["label"]
             series = raw["mia"].get(label, [])
             name = label
-            lim = get_limit("Mía - Nước mía", label)
+            lim = None
+            # Tra ngưỡng
+            for cmd, (sec, param) in LIMIT_LOOKUP.items():
+                if param == label or name == label:
+                    lim = get_limit(sec, param)
+                    break
         elif section_key == "mat":
             label = item if isinstance(item, str) else item["label"]
             series = raw["mat"].get(label, [])
             name = label
-            lim = get_limit("Mật rỉ - Bùn thô", label)
+            lim = None
+            for cmd, (sec, param) in LIMIT_LOOKUP.items():
+                if param == label:
+                    lim = get_limit(sec, param)
+                    break
         elif section_key == "hoa":
             section, key = item
             series = raw["hoa"].get(section, {}).get(key, [])
@@ -684,13 +723,31 @@ async def _send_error(context, chat_id, err_msg):
     except Exception:
         pass
 
+def _is_admin(uid):
+    return uid == ALLOWED_CHAT_ID
+
 def _guard(func):
-    """Decorator: chặn chat_id không được phép, bắt lỗi và tự báo cáo."""
+    """Decorator: kiểm soát quyền truy cập theo cấp."""
     async def wrapper(update, context):
-        uid = update.effective_chat.id
-        if uid not in _ALLOWED_USERS and uid != ALLOWED_CHAT_ID:
-            await update.message.reply_text("⛔ Không có quyền truy cập.")
+        uid  = update.effective_chat.id
+        cmd  = update.message.text.strip().split()[0].lstrip("/").split("@")[0].lower() if update.message and update.message.text else ""
+        is_admin = (uid == ALLOWED_CHAT_ID)
+        is_user  = (uid in _ALLOWED_USERS)
+
+        # Chưa được cấp quyền
+        if not is_admin and not is_user:
+            if cmd != "start":
+                await update.message.reply_text(
+                    "⛔ Bạn chưa có quyền truy cập.\n"
+                    "Gõ /start để gửi yêu cầu đến admin."
+                )
             return
+
+        # Lệnh admin-only
+        if cmd in ADMIN_ONLY_CMDS and not is_admin:
+            await update.message.reply_text("⛔ Lệnh này chỉ dành cho admin.")
+            return
+
         try:
             await func(update, context)
         except Exception as e:
@@ -703,6 +760,103 @@ def _guard(func):
 # ========================
 # BOT COMMANDS
 # ========================
+
+async def cmd_start(update, context):
+    """Xử lý /start — không cần @_guard vì ai cũng gọi được."""
+    uid      = update.effective_chat.id
+    user     = update.effective_user
+    name     = user.full_name or "Không rõ"
+    username = f"@{user.username}" if user.username else "_(không có username)_"
+
+    # Admin hoặc đã được duyệt
+    if uid == ALLOWED_CHAT_ID or uid in _ALLOWED_USERS:
+        await update.message.reply_text(
+            f"👋 Xin chào *{name}*! Bạn đã có quyền truy cập.\n"
+            "Gõ /help để xem danh sách lệnh.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Đã gửi yêu cầu rồi, chờ duyệt
+    if uid in _PENDING:
+        await update.message.reply_text(
+            "⏳ Yêu cầu của bạn đang chờ admin duyệt. Vui lòng chờ."
+        )
+        return
+
+    # Lưu vào pending
+    _PENDING[uid] = {"name": name, "username": username}
+
+    # Thông báo cho user
+    await update.message.reply_text(
+        f"👋 Xin chào *{name}*!\n\n"
+        "📨 Yêu cầu truy cập của bạn đã được gửi đến admin.\n"
+        "Vui lòng chờ phê duyệt.",
+        parse_mode="Markdown"
+    )
+
+    # Thông báo cho admin với inline buttons
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve", callback_data=f"approve:{uid}"),
+        InlineKeyboardButton("❌ Deny",    callback_data=f"deny:{uid}"),
+    ]])
+    await context.bot.send_message(
+        chat_id=ALLOWED_CHAT_ID,
+        text=(
+            f"🔔 *Yêu cầu truy cập mới*\n\n"
+            f"👤 Tên: *{name}*\n"
+            f"🔗 Username: {username}\n"
+            f"🆔 Chat ID: `{uid}`"
+        ),
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+
+async def cmd_approve_callback(update, context):
+    """Xử lý khi admin bấm Approve hoặc Deny."""
+    query = update.callback_query
+    await query.answer()
+
+    action, uid_str = query.data.split(":", 1)
+    uid  = int(uid_str)
+    info = _PENDING.get(uid, {})
+    name = info.get("name", str(uid))
+
+    if action == "approve":
+        if uid not in _ALLOWED_USERS:
+            _ALLOWED_USERS.append(uid)
+            save_allowed_users(_ALLOWED_USERS)
+        _PENDING.pop(uid, None)
+
+        # Cập nhật tin nhắn admin
+        await query.edit_message_text(
+            f"✅ *Đã phê duyệt* — {name} (`{uid}`)",
+            parse_mode="Markdown"
+        )
+        # Thông báo cho user
+        await context.bot.send_message(
+            chat_id=uid,
+            text=(
+                "✅ *Yêu cầu của bạn đã được phê duyệt!*\n"
+                "Gõ /help để xem danh sách lệnh."
+            ),
+            parse_mode="Markdown"
+        )
+
+    elif action == "deny":
+        _PENDING.pop(uid, None)
+        await query.edit_message_text(
+            f"❌ *Đã từ chối* — {name} (`{uid}`)",
+            parse_mode="Markdown"
+        )
+        await context.bot.send_message(
+            chat_id=uid,
+            text="❌ Yêu cầu truy cập của bạn đã bị từ chối."
+        )
+
+
 
 @_guard
 async def cmd_help(update, context):
@@ -719,10 +873,10 @@ async def cmd_help(update, context):
         "`/lệnh DD/MM-DD/MM`  → khoảng ngày\n"
         "\n`/summary [ngày]`  → tóm tắt tất cả thông số\n"
         "`/dashboard [ngày]`  → tải file Dashboard HTML\n"
-        "`/status`  → trạng thái hiện tại của bot\n\n"
+        "`/status`  → trạng thái bot\n\n"
         "*Quản lý (chỉ admin):*\n"
-        "`/add_user <chat_id>`  → thêm người dùng\n"
-        "`/remove_user <chat_id>`  → xóa người dùng\n"
+        "`/remove_user <chat_id>`  → thu hồi quyền người dùng\n"
+        "`/update`  → cập nhật dữ liệu ngay\n"
         "`/newcache DD/MM/YYYY - DD/MM/YYYY`  → fetch dữ liệu cũ"
     )
     await _send(context, update.effective_chat.id, msg)
@@ -740,28 +894,10 @@ async def cmd_status(update, context):
         f"📅 Khoảng data: `{cache.get('from_date')}` → `{cache.get('to_date')}`"
     )
 
-    # Liệt kê tất cả file cache*.json trong repo
-    try:
-        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/contents/"
-        r = requests.get(url, headers=_gh_headers(), timeout=15)
-        r.raise_for_status()
-        all_files = [f["name"] for f in r.json()
-                     if f["name"].startswith("cache") and f["name"].endswith(".json")]
-        all_files.sort()
-    except Exception:
-        all_files = []
-
-    if all_files:
-        cache_names = "\n".join(f"• `{n}`" for n in all_files)
-        cache_section = f"\n\n*📦 Dữ liệu sẵn có:*\n{cache_names}"
-    else:
-        cache_section = ""
-
     msg = (
         f"*🤖 Bot Status*\n"
         f"🟢 Online — `{now.strftime('%Y-%m-%d %H:%M:%S')}` (GMT+7)\n\n"
         f"{cache_line}"
-        f"{cache_section}"
     )
 
     if is_admin:
@@ -808,13 +944,7 @@ async def cmd_indicator(update, context):
 
     updated_at = cache.get("updated_at", "?")
 
-    # Parse ngày
-    try:
-        from_d, to_d = _parse_date_arg(arg)
-    except ValueError as e:
-        await update.message.reply_text(f"❌ {e}")
-        return
-
+    # from_d/to_d đã được parse ở trên — dùng lại, không parse lại
     if from_d is None:
         # Mặc định: 7 ngày mới nhất
         from_d, to_d = _latest_7_days(series)
@@ -865,23 +995,16 @@ async def cmd_summary(update, context):
     updated_at = cache.get("updated_at", "?")
 
     if from_d is None:
-        all_pts = []
-        for section_data in [raw.get("mia", {}), raw.get("mat", {})]:
-            for s in section_data.values():
-                all_pts.extend(s)
-        for section_data in raw.get("hoa", {}).values():
-            for s in section_data.values():
-                all_pts.extend(s)
-        for section_data in raw.get("nau", {}).values():
-            for s in section_data.values():
-                all_pts.extend(s)
+        all_series = list(raw.get("mia", {}).values())
+        all_pts    = [pt for s in all_series for pt in s]
         if all_pts:
-            latest = sorted({pt["t"][:10] for pt in all_pts if pt.get("v") is not None}, reverse=True)
-            from_d = to_d = latest[0]
+            latest = sorted({pt["t"][:10] for pt in all_pts}, reverse=True)
+            to_d   = latest[0]
+            from_d = latest[min(6, len(latest)-1)]
         else:
             await update.message.reply_text("📭 Không có dữ liệu trong cache.")
             return
-        date_label = _fmt_date(to_d)
+        date_label = f"7 ngày: {_fmt_date(from_d)} → {_fmt_date(to_d)}"
     elif from_d == to_d:
         date_label = _fmt_date(from_d)
     else:
@@ -907,119 +1030,134 @@ async def cmd_summary(update, context):
             await _send(context, update.effective_chat.id, msg)
 
 
-@_guard
-async def cmd_dashboard(update, context):
-    """Gửi file dashboard.html để người dùng tải về."""
-    import io
-    text  = update.message.text.strip()
-    parts = text.split(None, 1)
-    arg   = parts[1] if len(parts) > 1 else ""
+async def _fetch_dashboard_files() -> list[dict]:
+    """
+    Quét repo lấy danh sách tất cả dashboard_*.html.
+    Trả về list[{"name", "from", "to", "url"}] sắp xếp mới nhất trước.
+    """
+    import re as _re_dash
+    try:
+        api_url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/contents/"
+        r = requests.get(api_url, timeout=15)
+        r.raise_for_status()
+        files = r.json()
+    except Exception as e:
+        print(f"[DASHBOARD LIST ERROR] {e}", flush=True)
+        return []
 
-    # Thông báo đang xử lý
-    await update.message.reply_text("⏳ Đang tải Dashboard từ GitHub...")
-
-    cache, err = _load_cache_safe()
-    if err:
-        await update.message.reply_text(
-            f"⚠️ Không lấy được cache từ GitHub.\nLỗi: `{err}`",
-            parse_mode="Markdown"
+    result = []
+    for f in files:
+        m = _re_dash.match(
+            r'dashboard_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.html',
+            f["name"]
         )
-        return
+        if m:
+            result.append({
+                "name": f["name"],
+                "from": m.group(1),
+                "to":   m.group(2),
+                "url":  f"{GITHUB_RAW_BASE}/{f['name']}",
+            })
+    # Mới nhất (to_date lớn nhất) lên trước
+    return sorted(result, key=lambda x: (x["to"], x["from"]), reverse=True)
 
-    updated_at = cache.get("updated_at", "?")
 
-    # Xác định khoảng ngày để ghi vào caption
-    raw = cache.get("raw", {})
+async def _send_dashboard_file(bot, chat_id, dash_entry: dict):
+    """Tải và gửi 1 file dashboard HTML về chat."""
+    import io
     try:
-        from_d, to_d = _parse_date_arg(arg)
-    except ValueError as e:
-        await update.message.reply_text(f"❌ {e}")
-        return
-
-    if from_d is None:
-        all_series = list(raw.get("mia", {}).values())
-        all_pts    = [pt for s in all_series for pt in s]
-        if all_pts:
-            latest = sorted({pt["t"][:10] for pt in all_pts}, reverse=True)
-            to_d   = latest[0]
-            from_d = latest[min(6, len(latest)-1)]
-        else:
-            await update.message.reply_text("📭 Không có dữ liệu để tạo Dashboard.")
-            return
-        date_label = f"7 ngày: {_fmt_date(from_d)} → {_fmt_date(to_d)}"
-    elif from_d == to_d:
-        date_label = _fmt_date(from_d)
-    else:
-        date_label = f"{_fmt_date(from_d)} → {_fmt_date(to_d)}"
-
-    # Tải dashboard.html từ GitHub
-    try:
-        r = requests.get(DASHBOARD_URL, timeout=30)
+        r = requests.get(dash_entry["url"], timeout=30)
         r.raise_for_status()
         html_bytes = r.content
     except Exception as e:
-        await update.message.reply_text(
-            f"⚠️ Không tải được Dashboard từ GitHub.\nLỗi: `{e}`",
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"⚠️ Không tải được file.\nLỗi: `{e}`",
             parse_mode="Markdown"
         )
         return
 
-    file_obj  = io.BytesIO(html_bytes)
-    file_obj.name = "dashboard.html"
+    file_obj      = io.BytesIO(html_bytes)
+    file_obj.name = dash_entry["name"]
 
     caption = (
         f"📊 *Dashboard Kiểm Soát Dây Chuyền*\n"
-        f"🗓 {date_label}\n"
-        f"_🔄 Cập nhật lần cuối: {updated_at}_\n\n"
+        f"🗓 `{_fmt_date(dash_entry['from'])}` → `{_fmt_date(dash_entry['to'])}`\n\n"
         f"Mở file HTML bằng trình duyệt để xem đầy đủ."
     )
-
-    await context.bot.send_document(
-        chat_id=update.effective_chat.id,
+    await bot.send_document(
+        chat_id=chat_id,
         document=file_obj,
-        filename="dashboard.html",
+        filename=dash_entry["name"],
         caption=caption,
         parse_mode="Markdown"
     )
 
 
-def _is_admin(uid):
-    return uid == ALLOWED_CHAT_ID
-
 @_guard
-async def cmd_add_user(update, context):
-    if not _is_admin(update.effective_chat.id):
-        await update.message.reply_text("⛔ Chỉ admin mới dùng được lệnh này.")
-        return
-    parts = update.message.text.strip().split(None, 1)
-    if len(parts) < 2:
+async def cmd_dashboard(update, context):
+    """
+    /dashboard        → hiện danh sách file để chọn
+    /dashboard tất cả → gửi tất cả file dashboard có trong repo
+    """
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    await update.message.reply_text("⏳ Đang kiểm tra danh sách Dashboard...")
+
+    dash_files = await _fetch_dashboard_files()
+
+    if not dash_files:
         await update.message.reply_text(
-            "❌ Cú pháp: `/add_user <chat_id>`\n"
-            "Ví dụ: `/add_user 123456789`",
+            "⚠️ Không tìm thấy file Dashboard nào trong repo.\n"
+            "Fetcher cần chạy ít nhất 1 lần để tạo dashboard.",
             parse_mode="Markdown"
         )
         return
+
+    # Build inline keyboard — mỗi file 1 nút
+    buttons = []
+    for i, d in enumerate(dash_files):
+        label = f"📊 {_fmt_date(d['from'])} → {_fmt_date(d['to'])}"
+        buttons.append([InlineKeyboardButton(label, callback_data=f"dashboard:{i}")])
+
+    # Lưu danh sách vào context.bot_data tạm để callback dùng
+    context.bot_data["dashboard_list"] = dash_files
+
+    keyboard = InlineKeyboardMarkup(buttons)
+    await update.message.reply_text(
+        "📋 *Chọn file Dashboard muốn tải:*",
+        reply_markup=keyboard,
+        parse_mode="Markdown"
+    )
+
+
+async def cmd_dashboard_callback(update, context):
+    """Xử lý khi user bấm chọn file dashboard."""
+    query = update.callback_query
+    await query.answer()
+
+    if query.from_user.id != ALLOWED_CHAT_ID:
+        await query.edit_message_text("⛔ Không có quyền truy cập.")
+        return
+
     try:
-        new_id = int(parts[1].strip())
-    except ValueError:
-        await update.message.reply_text("❌ Chat ID phải là số nguyên.")
+        idx = int(query.data.split(":")[1])
+        dash_files = context.bot_data.get("dashboard_list", [])
+        if not dash_files or idx >= len(dash_files):
+            await query.edit_message_text("⚠️ Danh sách đã hết hạn. Gõ lại /dashboard.")
+            return
+        chosen = dash_files[idx]
+    except Exception as e:
+        await query.edit_message_text(f"⚠️ Lỗi: {e}")
         return
 
-    if new_id in _ALLOWED_USERS:
-        await update.message.reply_text(f"ℹ️ User `{new_id}` đã có trong danh sách.", parse_mode="Markdown")
-        return
+    await query.edit_message_text(
+        f"⏳ Đang tải `{chosen['name']}`...",
+        parse_mode="Markdown"
+    )
+    await _send_dashboard_file(context.bot, query.message.chat_id, chosen)
 
-    _ALLOWED_USERS.append(new_id)
-    ok = save_allowed_users(_ALLOWED_USERS)
-    if ok:
-        await update.message.reply_text(
-            f"✅ Đã thêm user `{new_id}`.\n"
-            f"👥 Danh sách hiện tại: {len(_ALLOWED_USERS)} user.",
-            parse_mode="Markdown"
-        )
-    else:
-        _ALLOWED_USERS.remove(new_id)
-        await update.message.reply_text("❌ Lỗi lưu danh sách user lên GitHub. Thử lại sau.")
+
 
 
 @_guard
@@ -1116,21 +1254,55 @@ async def cmd_newcache(update, context):
 
 
 @_guard
+async def cmd_update(update, context):
+    if not _is_admin(update.effective_chat.id):
+        await update.message.reply_text("⛔ Chỉ admin mới dùng được lệnh này.")
+        return
+
+    await update.message.reply_text("⏳ Đang gửi lệnh cập nhật dữ liệu...")
+
+    try:
+        url = f"{GITHUB_API}/repos/{GITHUB_OWNER}/{GITHUB_BOT_REPO}/actions/workflows/fetch.yml/dispatches"
+        r = requests.post(
+            url,
+            headers=_gh_headers(),
+            json={"ref": "main"},
+            timeout=15
+        )
+        if r.status_code == 204:
+            await update.message.reply_text(
+                "✅ Đã gửi lệnh cập nhật!\n"
+                "⏱ Fetcher đang chạy, thường mất 2–3 phút.\n"
+                "Bot sẽ tự thông báo khi hoàn tất.",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ GitHub API trả về HTTP {r.status_code}.\n`{r.text[:300]}`",
+                parse_mode="Markdown"
+            )
+    except Exception as e:
+        await update.message.reply_text(f"❌ Lỗi gọi GitHub API: `{e}`", parse_mode="Markdown")
+
+
 # ========================
 # BUILD APP
 # ========================
 def build_bot_app():
-    from telegram.ext import Application, CommandHandler
+    from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 
     app = Application.builder().token(BOT_TOKEN).build()
 
+    app.add_handler(CommandHandler("start",       cmd_start))
+    app.add_handler(CallbackQueryHandler(cmd_approve_callback, pattern=r"^(approve|deny):"))
+    app.add_handler(CallbackQueryHandler(cmd_dashboard_callback, pattern=r"^dashboard:\d+$"))
     app.add_handler(CommandHandler("help",        cmd_help))
     app.add_handler(CommandHandler("status",      cmd_status))
     app.add_handler(CommandHandler("summary",     cmd_summary))
     app.add_handler(CommandHandler("dashboard",   cmd_dashboard))
-    app.add_handler(CommandHandler("add_user",    cmd_add_user))
     app.add_handler(CommandHandler("remove_user", cmd_remove_user))
     app.add_handler(CommandHandler("newcache",    cmd_newcache))
+    app.add_handler(CommandHandler("update",      cmd_update))
 
     for cmd in COMMAND_MAP:
         cmd_name = cmd.lstrip("/")
@@ -1146,13 +1318,14 @@ async def _register_commands(app):
 
     # Lệnh chính — luôn ưu tiên đứng đầu
     commands += [
+        BotCommand("start",       "Bắt đầu / Yêu cầu truy cập"),
         BotCommand("help",        "Danh sách lệnh"),
-        BotCommand("status",      "Trạng thái hiện tại của bot"),
+        BotCommand("status",      "Trạng thái bot"),
         BotCommand("summary",     "Tóm tắt tất cả thông số [ngày]"),
         BotCommand("dashboard",   "Tải file Dashboard HTML [ngày]"),
-        BotCommand("add_user",    "Thêm người dùng (admin)"),
-        BotCommand("remove_user", "Xóa người dùng (admin)"),
+        BotCommand("remove_user", "Thu hồi quyền người dùng (admin)"),
         BotCommand("newcache",    "Fetch dữ liệu cũ (admin)"),
+        BotCommand("update",      "Cập nhật dữ liệu ngay (admin)"),
     ]
 
     # Lệnh indicator
