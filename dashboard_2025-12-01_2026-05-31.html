@@ -287,7 +287,7 @@ function makeChart(id, seriesList, section, singleParam) {
     }
   }
   const lim = seriesList.length===1 && singleParam ? getLimit(section, singleParam) : null;
-  const ds = seriesList.map((({label, series}, i) => {
+  const ds = seriesList.map(({label, series}, i) => {
     const map = {};
     series.forEach(pt => map[pt.t] = pt.v);
     const data = labels.map(l => map[l] !== undefined ? map[l] : null);
@@ -311,7 +311,7 @@ function makeChart(id, seriesList, section, singleParam) {
   }));
   charts[id] = new Chart(ctx, {
     type: 'line',
-    data: { labels, datasets: [...ds, ...limitDs] },
+    data: { labels, datasets: [...ds, ...limitDs].flat() },
     options: {
       responsive:true, maintainAspectRatio:false,
       plugins: {
