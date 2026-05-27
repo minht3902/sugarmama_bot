@@ -43,9 +43,17 @@ jobs:
         run: python fetcher.py
 
       - name: Commit & push cache + dashboard
+        timeout-minutes: 10
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add cache*.json dashboard*.html
-          git diff --cached --quiet || git commit -m "chore: update cache & dashboard [$(date -u '+%Y-%m-%d %H:%M UTC')]"
-          git push
+          git diff --cached --quiet && echo "Nothing to commit" && exit 0
+          git commit -m "chore: update cache & dashboard [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+          # Retry git push tối đa 3 lần
+          for i in 1 2 3; do
+            git push && break
+            echo "Push attempt $i failed, retrying in 15s..."
+            sleep 15
+            git pull --rebase origin main
+          done
