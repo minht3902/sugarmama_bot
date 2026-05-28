@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Kiểm Soát Dây Chuyền – __MONTH_LABEL__</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --surface2: #222636;
+    --border: #2e3348; --text: #e4e6f0; --muted: #8891a8; --radius: 12px;
+    --c1:#4f8ef7; --c2:#f7774f; --c3:#4fc9a4; --c4:#f7c34f; --c5:#b44ff7; --c6:#f74f7a; --c7:#4ff7d8;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; font-size:13px; }
+  header {
+    background:linear-gradient(135deg,#1a1d27,#1e2235);
+    border-bottom:1px solid var(--border); padding:12px 22px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:100; box-shadow:0 2px 16px rgba(0,0,0,.5);
+    flex-wrap:wrap; gap:10px;
+  }
+  .header-left h1 { font-size:16px; font-weight:700; color:#fff; }
+  .header-left p  { font-size:11px; color:var(--muted); margin-top:2px; }
+  .header-right { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .date-filter { display:flex; align-items:center; gap:6px; }
+  .date-filter label { font-size:11px; color:var(--muted); font-weight:600; letter-spacing:.4px; }
+  .date-input {
+    background:var(--surface2); border:1px solid var(--border); color:var(--text);
+    padding:5px 8px; border-radius:7px; font-size:11px; cursor:pointer; outline:none;
+    font-family:inherit; transition:border-color .15s;
+  }
+  .date-input:hover, .date-input:focus { border-color:var(--c1); }
+  .btn-reset {
+    background:transparent; border:1px solid var(--border); color:var(--muted);
+    padding:5px 10px; border-radius:7px; font-size:11px; cursor:pointer;
+    transition:all .15s; font-family:inherit;
+  }
+  .btn-reset:hover { border-color:var(--c2); color:var(--c2); }
+  .chip-pts {
+    background:var(--surface2); border:1px solid var(--border); color:var(--muted);
+    font-size:10px; font-weight:600; padding:4px 10px; border-radius:20px;
+    font-family:'Courier New',monospace; letter-spacing:.4px;
+  }
+  /* Live indicator */
+  #liveChip {
+    font-size:10px; font-weight:600; padding:4px 10px; border-radius:20px;
+    font-family:'Courier New',monospace; letter-spacing:.4px;
+    background:var(--surface2); border:1px solid var(--border); color:var(--muted);
+    cursor:default; transition:all .3s;
+  }
+  #liveChip.online  { background:rgba(79,201,164,.1);  border-color:rgba(79,201,164,.4);  color:#4fc9a4; }
+  #liveChip.offline { background:rgba(247,119,79,.1);  border-color:rgba(247,119,79,.4);  color:#f7774f; }
+  #liveChip.loading { background:rgba(247,195,79,.1);  border-color:rgba(247,195,79,.4);  color:#f7c34f; }
+  .tabs {
+    display:flex; gap:2px; padding:12px 22px 0; border-bottom:1px solid var(--border);
+    background:var(--surface); overflow-x:auto;
+  }
+  .tabs::-webkit-scrollbar { height:3px; }
+  .tabs::-webkit-scrollbar-thumb { background:var(--border); }
+  .tab-btn {
+    padding:7px 16px; border:none; background:transparent; color:var(--muted);
+    cursor:pointer; font-size:12.5px; font-weight:500;
+    border-bottom:2px solid transparent; transition:.18s; white-space:nowrap; border-radius:6px 6px 0 0;
+  }
+  .tab-btn.active { color:#fff; border-bottom-color:var(--c1); background:rgba(79,142,247,.09); }
+  .tab-btn:hover:not(.active) { color:var(--text); background:rgba(255,255,255,.04); }
+  .content { padding:18px 22px; }
+  .section-header { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+  .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .section-title { font-size:14px; font-weight:700; color:#fff; }
+  .chart-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr)); gap:14px; }
+  .chart-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:14px; transition:border-color .2s; position:relative;
+  }
+  .chart-card:hover { border-color:#3d4460; }
+  .card-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+  .card-title { font-size:11px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .card-badges { display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
+  .cbadge {
+    font-size:10px; padding:2px 7px; border-radius:8px;
+    background:var(--surface2); color:var(--muted); letter-spacing:0; text-transform:none;
+  }
+  .cbadge.limit-badge { background:rgba(247,119,79,.15); color:#f7c34f; border:1px solid rgba(247,195,79,.25); }
+  .chart-wrap { position:relative; height:190px; }
+  .stat-row { display:flex; gap:5px; margin-top:9px; border-top:1px solid var(--border); padding-top:9px; }
+  .stat-item { flex:1; text-align:center; }
+  .stat-val { font-size:12.5px; font-weight:700; color:#fff; }
+  .stat-lbl { font-size:9.5px; color:var(--muted); margin-top:1px; }
+  .stat-item.breach .stat-val { color:#f7774f !important; }
+  .stat-item.ok .stat-val { color:#4fc9a4 !important; }
+  .section-group { margin-bottom:26px; }
+  .sub-label {
+    font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.4px;
+    text-transform:uppercase; margin-bottom:10px; padding-left:2px;
+  }
+  .legend-bar {
+    display:flex; gap:14px; flex-wrap:wrap; margin-bottom:12px;
+    font-size:10.5px; color:var(--muted);
+  }
+  .legend-item { display:flex; align-items:center; gap:5px; }
+  .legend-line { width:22px; height:2px; }
+  .legend-line.solid        { background:#4f8ef7; }
+  .legend-line.dashed       { background:repeating-linear-gradient(90deg,#f7774f 0,#f7774f 4px,transparent 4px,transparent 8px); }
+  .legend-line.dashed-green { background:repeating-linear-gradient(90deg,#4fc9a4 0,#4fc9a4 4px,transparent 4px,transparent 8px); }
+  .bfbtn {
+    font-size:10.5px; padding:3px 9px; border-radius:7px;
+    background:var(--surface2); border:1px solid var(--border); color:var(--muted);
+    cursor:pointer; font-family:inherit; transition:all .12s;
+  }
+  .bfbtn.active { background:rgba(79,142,247,.18); border-color:var(--c1); color:#fff; }
+  .bfbtn:hover:not(.active) { border-color:#4f8ef7; color:var(--text); }
+  .ov-group { border:1px solid var(--border); border-radius:var(--radius); margin-bottom:12px; overflow:hidden; }
+  .ov-group-header {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:11px 16px; cursor:pointer; border-left:3px solid transparent;
+    transition:background .15s;
+  }
+  .ov-group-header:hover { background:var(--surface2); }
+  .ov-chevron { font-size:10px; color:var(--muted); transition:transform .2s; }
+  .ov-group-body { padding:10px 4px 4px; }
+  /* Summary table */
+  .sum-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:14px; }
+  .sum-table th {
+    background:var(--surface2); color:var(--muted); font-weight:600;
+    padding:8px 10px; text-align:left; border-bottom:2px solid var(--border);
+    white-space:nowrap; position:sticky; top:0; z-index:1;
+  }
+  .sum-table td {
+    padding:7px 10px; border-bottom:1px solid var(--border);
+    vertical-align:middle; line-height:1.4;
+  }
+  .sum-table tr:hover td { background:rgba(255,255,255,.03); }
+  .sum-table .group-row td {
+    background:var(--surface); color:#fff; font-weight:700;
+    font-size:11px; letter-spacing:.4px; padding:5px 10px;
+    border-top:2px solid var(--border);
+  }
+  .sum-table .no-lim { color:#444; font-style:italic; }
+  .sum-breach { color:#f7774f; font-weight:600; }
+  .sum-ok    { color:#4fc9a4; font-weight:600; }
+  .btn-export {
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(79,201,164,.12); border:1px solid rgba(79,201,164,.3);
+    color:#4fc9a4; padding:6px 14px; border-radius:8px; font-size:12px;
+    cursor:pointer; font-family:inherit; transition:all .15s;
+  }
+  .btn-export:hover { background:rgba(79,201,164,.22); border-color:#4fc9a4; }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-left">
+    <h1>📊 Dashboard Kiểm Soát Dây Chuyền</h1>
+  </div>
+  <div class="header-right">
+    <div class="date-filter">
+      <label>TỪ</label>
+      <input type="date" id="dateFrom" class="date-input"
+             value="__FROM_ISO__" min="__FROM_ISO__" max="__ACTUAL_LAST__"
+             onchange="applyFilter()">
+      <label>ĐẾN</label>
+      <input type="date" id="dateTo" class="date-input"
+             value="__ACTUAL_LAST__" min="__FROM_ISO__" max="__ACTUAL_LAST__"
+             onchange="applyFilter()">
+      <button class="btn-reset" onclick="resetFilter()">✕ Reset</button>
+    </div>
+    <span class="chip-pts" id="pointChip">— ĐIỂM ĐO</span>
+    <span id="liveChip" title="Trạng thái dữ liệu trực tuyến">⬤ OFFLINE</span>
+  </div>
+</header>
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('overview')">🏠 Tổng quan</button>
+  <button class="tab-btn" onclick="showTab('hoa1')">Syrup sau lắng nổi</button>
+  <button class="tab-btn" onclick="showTab('hoa2')">Syrup trước lắng nổi</button>
+  <button class="tab-btn" onclick="showTab('hoa3')">Nước chè trong 2</button>
+  <button class="tab-btn" onclick="showTab('hoa4')">Sirô thô sau bốc hơi</button>
+  <button class="tab-btn" onclick="showTab('nau1')">Đường non A / B / C</button>
+  <button class="tab-btn" onclick="showTab('nau2')">Đường B &amp; C</button>
+  <button class="tab-btn" onclick="showTab('nau3')">Mật &amp; Hồi dung</button>
+  <button class="tab-btn" onclick="showTab('mia')">Mía – Nước mía</button>
+  <button class="tab-btn" onclick="showTab('matri')">Mật rỉ – Bùn thô</button>
+</div>
+<div class="content" id="mainContent"></div>
+
+<script>
+// ============================================================
+// DATA — injected by fetcher.py via .replace()
+// ============================================================
+const LIMITS = __LIMITS_JSON__;
+let RAW = __RAW_JSON__;
+
+// Metadata injected at build time
+const EMBED_FROM   = '__FROM_ISO__';
+const EMBED_LAST   = '__ACTUAL_LAST__';
+const CACHE_FILE   = '__CACHE_FILE__';   // e.g. cache_2025-01-01_2025-04-30.json
+const GITHUB_OWNER = '__GITHUB_OWNER__';
+const GITHUB_REPO  = '__GITHUB_REPO__';
+
+// ============================================================
+// LIVE POLLING — GitHub API (no cache headers)
+// ============================================================
+const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+let pollTimer = null;
+
+function setLiveChip(state, label) {
+  const el = document.getElementById('liveChip');
+  el.className = state;
+  el.textContent = label;
+}
+
+async function fetchLiveData() {
+  if (!CACHE_FILE || !GITHUB_OWNER || !GITHUB_REPO) return;
+  setLiveChip('loading', '↻ Đang tải...');
+  try {
+    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${CACHE_FILE}?v=${Date.now()}`;
+    const res = await fetch(apiUrl, {
+      headers: { 'Accept': 'application/vnd.github.v3.raw' },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cache = await res.json();
+    if (cache && cache.raw) {
+      RAW = cache.raw;
+      renderTab();
+      const upd = cache.updated_at || '?';
+      setLiveChip('online', `⬤ LIVE · ${upd.slice(11,16)}`);
+    } else {
+      setLiveChip('offline', '⬤ OFFLINE');
+    }
+  } catch(e) {
+    setLiveChip('offline', '⬤ OFFLINE');
+    console.warn('[Dashboard] Live fetch failed:', e.message);
+  }
+}
+
+function startPolling() {
+  fetchLiveData();
+  pollTimer = setInterval(fetchLiveData, POLL_INTERVAL_MS);
+}
+
+// Start polling after initial render
+window.addEventListener('load', () => {
+  // Slight delay so initial render finishes first
+  setTimeout(startPolling, 2000);
+});
+
+// ============================================================
+// FILTERS
+// ============================================================
+let filterFrom = EMBED_FROM;
+let filterTo   = EMBED_LAST;
+
+function applyFilter() {
+  const from = document.getElementById('dateFrom').value;
+  const to   = document.getElementById('dateTo').value;
+  if (!from || !to) return;
+  filterFrom = from;
+  filterTo   = to;
+  renderTab();
+  updatePointCount();
+}
+function resetFilter() {
+  document.getElementById('dateFrom').value = EMBED_FROM;
+  document.getElementById('dateTo').value   = EMBED_LAST;
+  applyFilter();
+}
+function filterSeries(series) {
+  return series.filter(pt => {
+    const d = pt.t.substring(0, 10);
+    return d >= filterFrom && d <= filterTo;
+  });
+}
+function updatePointCount() {
+  setTimeout(() => {
+    let total = 0;
+    document.querySelectorAll('canvas').forEach(c => {
+      const ch = Chart.getChart(c);
+      if (ch) total += (ch.data.datasets[0]?.data?.filter(v=>v!=null).length||0);
+    });
+    document.getElementById('pointChip').textContent = total + ' ĐIỂM ĐO';
+  }, 200);
+}
+
+// ============================================================
+// LIMITS HELPER
+// ============================================================
+function getLimit(section, param) {
+  if (LIMITS[section]?.[param]) return LIMITS[section][param];
+  if (LIMITS['Mía - Nước mía']?.[param]) return LIMITS['Mía - Nước mía'][param];
+  if (LIMITS['Mật rỉ - Bùn thô']?.[param]) return LIMITS['Mật rỉ - Bùn thô'][param];
+  return null;
+}
+
+// ============================================================
+// SERIES HELPER
+// ============================================================
+const COLORS = ['#4f8ef7','#f7774f','#4fc9a4','#f7c34f','#b44ff7','#f74f7a','#4ff7d8'];
+let charts = {};
+let currentTab = 'overview';
+
+function getSeries(section, param, dataset) {
+  let src;
+  if (dataset === 'hoa') src = RAW.hoa;
+  else if (dataset === 'nau') src = RAW.nau;
+  else if (dataset === 'mia') src = RAW.mia;
+  else if (dataset === 'matri') src = RAW.mat;
+  else src = RAW.nau;
+  let raw;
+  if (src?.[section]?.[param]) raw = src[section][param];
+  else if (src?.[param]) raw = src[param];
+  else return [];
+  return filterSeries(raw);
+}
+
+// ============================================================
+// STATS + CHART
+// ============================================================
+function calcStats(series, lim) {
+  const clean = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+  if (!clean.length) return {min:'N/A',max:'N/A',avg:'N/A',last:'N/A',trend:'flat',breachCount:0,aboveCount:0,belowCount:0,total:0};
+  const avg = (clean.reduce((a,b)=>a+b,0)/clean.length).toFixed(2);
+  const min = Math.min(...clean).toFixed(2);
+  const max = Math.max(...clean).toFixed(2);
+  const last = clean[clean.length-1].toFixed(2);
+  const prev = clean.length>1 ? clean[clean.length-2] : clean[0];
+  const trend = clean[clean.length-1]>prev+0.01?'up':clean[clean.length-1]<prev-0.01?'down':'flat';
+  let breachCount=0, aboveCount=0, belowCount=0;
+  if (lim) clean.forEach(v=>{
+    if (v > lim.hi) { breachCount++; aboveCount++; }
+    else if (v < lim.lo) { breachCount++; belowCount++; }
+  });
+  return {min,max,avg,last,trend,breachCount,aboveCount,belowCount,total:clean.length};
+}
+
+function makeChart(id, seriesList, section, singleParam) {
+  const ctx = document.getElementById(id);
+  if (!ctx) return;
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+  const allTs = new Set();
+  seriesList.forEach(({series}) => series.forEach(pt => allTs.add(pt.t)));
+  const labels = Array.from(allTs).sort();
+  let limitDs = [];
+  if (seriesList.length === 1 && singleParam) {
+    const lim = getLimit(section, singleParam);
+    if (lim) {
+      limitDs = [
+        { label:`Cận trên (${lim.hi})`, data:Array(labels.length).fill(lim.hi),
+          borderColor:'#f7774f', backgroundColor:'transparent', borderWidth:1.5,
+          borderDash:[6,4], pointRadius:0, pointHoverRadius:0, order:0, spanGaps:true },
+        { label:`Cận dưới (${lim.lo})`, data:Array(labels.length).fill(lim.lo),
+          borderColor:'#4fc9a4', backgroundColor:'transparent', borderWidth:1.5,
+          borderDash:[6,4], pointRadius:0, pointHoverRadius:0, order:0, spanGaps:true },
+      ];
+    }
+  }
+  const lim = seriesList.length===1 && singleParam ? getLimit(section, singleParam) : null;
+  const ds = seriesList.map(({label, series}, i) => {
+    const map = {};
+    series.forEach(pt => map[pt.t] = pt.v);
+    const data = labels.map(l => map[l] !== undefined ? map[l] : null);
+    const col = COLORS[i % COLORS.length];
+    return {
+      label, data,
+      borderColor: col,
+      backgroundColor: col+'20',
+      borderWidth: 2,
+      pointRadius: data.map(v => v !== null ? 2.5 : 0),
+      pointHoverRadius: 5,
+      tension: 0.3, fill: seriesList.length===1,
+      spanGaps: true, order: 1,
+      pointBackgroundColor: data.map(v => {
+        if (v===null) return 'transparent';
+        if (lim && (v < lim.lo || v > lim.hi)) return '#f7774f';
+        return col;
+      }),
+      pointBorderColor: 'transparent',
+    };
+  });
+  charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [...ds, ...limitDs].flat() },
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins: {
+        legend: {
+          display: ds.length>1 || limitDs.length>0,
+          labels: { color:'#8891a8', font:{size:10}, boxWidth:14, padding:8 }
+        },
+        tooltip: {
+          backgroundColor:'#1a1d27', borderColor:'#2e3348', borderWidth:1,
+          titleColor:'#fff', bodyColor:'#aab', padding:10,
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y?.toFixed(2) ?? 'N/A';
+              const ll = lim && ctx.datasetIndex===0 ? lim : null;
+              let flag = '';
+              if (ll) {
+                const raw = ctx.parsed.y;
+                if (raw > ll.hi) flag = ' ⚠️ vượt cận trên';
+                else if (raw < ll.lo) flag = ' ⚠️ dưới cận dưới';
+              }
+              return ` ${ctx.dataset.label}: ${v}${flag}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid:{color:'#1e2235'}, ticks:{color:'#6b748a', font:{size:9}, maxRotation:90, minRotation:90, maxTicksLimit:16} },
+        y: { grid:{color:'#1e2235'}, ticks:{color:'#6b748a', font:{size:10}} }
+      }
+    }
+  });
+}
+
+function cardHtml(id, title, section, param, dataset) {
+  const series = getSeries(section, param, dataset);
+  const lim = getLimit(section, param);
+  const s = calcStats(series, lim);
+  const tIcon = s.trend==='up'?'▲':s.trend==='down'?'▼':'—';
+  const lastNum = parseFloat(s.last);
+  const inRange = lim ? (lastNum>=lim.lo && lastNum<=lim.hi) : null;
+  const pct = (s.total>0 && lim) ? ((s.breachCount/s.total)*100).toFixed(1) : null;
+  const badges = `<div class="card-badges">
+    <span class="cbadge">${section}</span>
+    ${lim ? `<span class="cbadge limit-badge">↕ ${lim.lo}–${lim.hi}</span>` : ''}
+    ${lim && s.breachCount>0 ? `
+      <span class="cbadge breach-badge" style="background:rgba(247,119,79,.2);color:#f7774f;border:1px solid rgba(247,119,79,.3);cursor:pointer"
+        onclick="toggleBreachFilter(event,'${id}','${section}','${param}','${dataset}')">
+        ⚠️ ${s.breachCount} lệch (${pct}%) ▾
+      </span>` : ''}
+    ${lim && s.breachCount===0 && series.length>0 ? `<span class="cbadge" style="background:rgba(79,201,164,.12);color:#4fc9a4;border:1px solid rgba(79,201,164,.25)">✓ Đạt chuẩn</span>` : ''}
+  </div>`;
+  const lastClass = lim ? (inRange ? 'ok' : 'breach') : '';
+  const breachStat = lim ? `<div class="stat-item ${s.breachCount>0?'breach':'ok'}"><div class="stat-val">${s.breachCount}/${s.total}</div><div class="stat-lbl">Lệch/Tổng ${pct?pct+'%':''}</div></div>` : '';
+  return `<div class="chart-card" id="card_${id}">
+    <div class="card-top"><div class="card-title">${title}</div>${badges}</div>
+    <div id="bfilter_${id}" style="display:none;padding:4px 0 8px;display:none">
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="bfbtn active" data-card="${id}" data-mode="all" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">Tất cả</button>
+        <button class="bfbtn" data-card="${id}" data-mode="above" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▲ Vượt cận trên (${s.aboveCount})</button>
+        <button class="bfbtn" data-card="${id}" data-mode="below" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">▼ Dưới cận dưới (${s.belowCount})</button>
+        <button class="bfbtn" data-card="${id}" data-mode="breach" onclick="setBreachMode(this,'${id}','${section}','${param}','${dataset}')">⚠️ Chỉ điểm lệch (${s.breachCount})</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="${id}"></canvas></div>
+    <div class="stat-row">
+      <div class="stat-item"><div class="stat-val">${s.avg}</div><div class="stat-lbl">Trung bình</div></div>
+      <div class="stat-item"><div class="stat-val" style="color:#4fc9a4">${s.min}</div><div class="stat-lbl">Min</div></div>
+      <div class="stat-item"><div class="stat-val" style="color:#f7774f">${s.max}</div><div class="stat-lbl">Max</div></div>
+      <div class="stat-item ${lastClass}"><div class="stat-val ${s.trend}">${tIcon} ${s.last}</div><div class="stat-lbl">Gần nhất ${lim?(inRange?'✓':'⚠️'):''}</div></div>
+      ${breachStat}
+    </div>
+  </div>`;
+}
+
+function toggleBreachFilter(evt, id, section, param, dataset) {
+  evt.stopPropagation();
+  const panel = document.getElementById('bfilter_' + id);
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+  panel.style.flexDirection = 'column';
+}
+
+function setBreachMode(btn, id, section, param, dataset) {
+  btn.closest('[id^="bfilter_"]').querySelectorAll('.bfbtn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const mode = btn.dataset.mode;
+  const rawSeries = getSeries(section, param, dataset);
+  const lim = getLimit(section, param);
+  let filtered;
+  if (mode === 'all' || !lim) {
+    filtered = rawSeries;
+  } else if (mode === 'above') {
+    filtered = rawSeries.filter(pt => pt.v !== null && pt.v > lim.hi);
+  } else if (mode === 'below') {
+    filtered = rawSeries.filter(pt => pt.v !== null && pt.v < lim.lo);
+  } else if (mode === 'breach') {
+    filtered = rawSeries.filter(pt => pt.v !== null && (pt.v > lim.hi || pt.v < lim.lo));
+  } else {
+    filtered = rawSeries;
+  }
+  makeChart(id, [{label: param, series: filtered}], section, param);
+}
+
+function renderCardChart(id, section, param, dataset) {
+  const series = getSeries(section, param, dataset);
+  makeChart(id, [{label: param, series}], section, param);
+  attachZoom(id);
+}
+
+function attachZoom(id) {
+  const canvas = document.getElementById(id);
+  if (!canvas || canvas._zoomAttached) return;
+  canvas._zoomAttached = true;
+  canvas.style.cursor = 'crosshair';
+  canvas.addEventListener('wheel', function(e) {
+    e.preventDefault();
+    const chart = charts[id];
+    if (!chart) return;
+    const factor = e.deltaY < 0 ? 0.82 : 1.22;
+    const rect   = canvas.getBoundingClientRect();
+    const xPct   = (e.clientX - rect.left) / rect.width;
+    const yPct   = (e.clientY - rect.top)  / rect.height;
+    const xs = chart.scales.x, ys = chart.scales.y;
+    const xRange = (xs.max - xs.min) * factor;
+    const xCtr   = xs.min + (xs.max - xs.min) * xPct;
+    const yRange = (ys.max - ys.min) * factor;
+    const yCtr   = ys.min + (ys.max - ys.min) * (1 - yPct);
+    chart.options.scales.x.min = xCtr - xRange * xPct;
+    chart.options.scales.x.max = xCtr + xRange * (1 - xPct);
+    chart.options.scales.y.min = yCtr - yRange * (1 - yPct);
+    chart.options.scales.y.max = yCtr + yRange * yPct;
+    chart.update('none');
+  }, { passive: false });
+  canvas.addEventListener('dblclick', function() {
+    const chart = charts[id];
+    if (!chart) return;
+    delete chart.options.scales.x.min; delete chart.options.scales.x.max;
+    delete chart.options.scales.y.min; delete chart.options.scales.y.max;
+    chart.update();
+  });
+}
+
+function legendBar() {
+  return `<div class="legend-bar">
+    <div class="legend-item"><div class="legend-line solid"></div> Giá trị đo</div>
+    <div class="legend-item"><div class="legend-line dashed"></div> Cận trên</div>
+    <div class="legend-item"><div class="legend-line dashed-green"></div> Cận dưới</div>
+    <div class="legend-item" style="color:#f7774f">● Điểm vượt ngưỡng</div>
+  </div>`;
+}
+
+function exportTableExcel() {
+  const rows = [['Nhóm','Thông số','Cận dưới','Cận trên','Trung bình','Std Dev (σ)','Lệch tổng (%)','▲ Vượt trên (%)','▼ Dưới cận (%)','Tổng điểm đo']];
+  document.querySelectorAll('#sum-table-body tr').forEach(tr => {
+    if (tr.classList.contains('group-row')) return;
+    const cells = tr.querySelectorAll('td');
+    if (cells.length < 4) return;
+    const group   = tr.dataset.group  || '';
+    const param   = cells[0].innerText.trim();
+    const limText = cells[1].innerText.trim();
+    const lo = limText === '—' ? '' : (limText.split('–')[0] || '');
+    const hi = limText === '—' ? '' : (limText.split('–')[1] || '');
+    const avgStd  = cells[2].innerText.trim();
+    const avg = avgStd.split('±')[0]?.trim() || avgStd;
+    const std = avgStd.split('±')[1]?.trim() || '';
+    const pctText = cells[3].innerText.trim();
+    const pctLines = pctText.split('\n').map(l=>l.trim()).filter(Boolean);
+    const pctTotal = (pctLines[0]||'').replace(/[^0-9.]/g,'');
+    const pctAbove = (pctLines[1]||'').replace(/[^0-9.]/g,'');
+    const pctBelow = (pctLines[2]||'').replace(/[^0-9.]/g,'');
+    const n = cells[4]?.innerText.trim() || '';
+    rows.push([group, param, lo, hi, avg, std, pctTotal, pctAbove, pctBelow, n]);
+  });
+  const BOM = '\uFEFF';
+  const csv = BOM + rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = 'TongHop_ThongSo.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ============================================================
+// RENDER OVERVIEW
+// ============================================================
+function renderOverview() {
+  const mc = document.getElementById('mainContent');
+
+  const TAB_GROUPS = [
+    {
+      tab: 'hoa1', label: 'Syrup sau lắng nổi', color: '#4f8ef7', d: 'hoa',
+      sections: [
+        {s:'Syrup sau lắng nổi', ps:['Ap','Bx','Pol','pH','Độ màu']}
+      ]
+    },
+    {
+      tab: 'hoa2', label: 'Syrup trước lắng nổi', color: '#4fc9a4', d: 'hoa',
+      sections: [
+        {s:'Syrup trước lắng nổi', ps:['Bx','pH','Độ màu']}
+      ]
+    },
+    {
+      tab: 'hoa3', label: 'Nước chè trong 2', color: '#f7c34f', d: 'hoa',
+      sections: [
+        {s:'Nước chè trong 2', ps:['Ap','Bx','Pol','pH','Độ màu','Độ đục (IU)']}
+      ]
+    },
+    {
+      tab: 'hoa4', label: 'Sirô thô sau bốc hơi', color: '#b44ff7', d: 'hoa',
+      sections: [
+        {s:'Sirô thô sau bốc hơi', ps:['Ap','Bx','Pol','pH','Độ màu']}
+      ]
+    },
+    {
+      tab: 'nau1', label: 'Đường non A / B / C', color: '#f7774f', d: 'nau',
+      sections: [
+        {s:'Đường non A', ps:['Ap','Bx','Pol']},
+        {s:'Đường non B', ps:['Ap','Bx','Pol']},
+        {s:'Đường non C', ps:['Ap','Bx','Pol']},
+      ]
+    },
+    {
+      tab: 'nau2', label: 'Đường B & C', color: '#4fc9a4', d: 'nau',
+      sections: [
+        {s:'Đường B', ps:['Ap','Bx','Pol']},
+        {s:'Đường C', ps:['Ap','Bx','Pol']},
+      ]
+    },
+    {
+      tab: 'nau3', label: 'Mật & Hồi dung', color: '#f7c34f', d: 'nau',
+      sections: [
+        {s:'Mật nguyên A', ps:['Ap','Bx','Pol']},
+        {s:'Mật loãng A',  ps:['Ap','Bx','Pol']},
+        {s:'Mật B',        ps:['Ap','Bx','Pol']},
+        {s:'Hồi dung B',   ps:['Ap','Bx','Pol','Độ màu']},
+        {s:'Hồi dung C',   ps:['Ap','Bx','Pol','Độ màu']},
+      ]
+    },
+    {
+      tab: 'mia', label: 'Mía – Nước mía', color: '#4f8ef7', d: 'mia',
+      sections: [
+        {s:'Pol bã',          ps:['Pol bã']},
+        {s:'Ẩm bã',           ps:['Ẩm bã']},
+        {s:'Xơ mía',          ps:['Xơ mía']},
+        {s:'pH gia vôi NM HH',ps:['pH gia vôi NM HH']},
+        {s:'pH NM trung hòa', ps:['pH NM trung hòa']},
+        {s:'Ap NM HH',        ps:['Ap NM HH']},
+        {s:'Bx NM HH',        ps:['Bx NM HH']},
+        {s:'Pol NM HH',       ps:['Pol NM HH']},
+        {s:'Ap NM đầu',       ps:['Ap NM đầu']},
+        {s:'Bx NM đầu',       ps:['Bx NM đầu']},
+        {s:'Pol NM đầu',      ps:['Pol NM đầu']},
+        {s:'Ap NM cuối',      ps:['Ap NM cuối']},
+        {s:'Bx NM cuối',      ps:['Bx NM cuối']},
+        {s:'Pol NM cuối',     ps:['Pol NM cuối']},
+        {s:'P2O5',            ps:['P2O5']},
+      ]
+    },
+    {
+      tab: 'matri', label: 'Mật rỉ – Bùn thô', color: '#f7774f', d: 'matri',
+      sections: [
+        {s:'Pol bùn',    ps:['Pol bùn']},
+        {s:'Độ ẩm bùn',  ps:['Độ ẩm bùn']},
+        {s:'Ap mật cuối',ps:['Ap mật cuối']},
+        {s:'Bx mật cuối',ps:['Bx mật cuối']},
+        {s:'Pol mật cuối',ps:['Pol mật cuối']},
+        {s:'RS mật cuối', ps:['RS mật cuối']},
+        {s:'Ap mật rỉ',  ps:['Ap mật rỉ']},
+        {s:'Bx mật rỉ',  ps:['Bx mật rỉ']},
+        {s:'Bx1 mật rỉ', ps:['Bx1 mật rỉ']},
+        {s:'Pol mật rỉ', ps:['Pol mật rỉ']},
+      ]
+    },
+  ];
+
+  const dateLabel = filterFrom === filterTo ? filterFrom : filterFrom + ' → ' + filterTo;
+
+  let withLimCount = 0, withLimBreach = 0, totalPts = 0;
+  TAB_GROUPS.forEach(g => g.sections.forEach(sec => sec.ps.forEach(p => {
+    const series = getSeries(sec.s, p, g.d);
+    const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+    totalPts += vals.length;
+    const lim = getLimit(sec.s, p);
+    if (lim) {
+      withLimCount += vals.length;
+      vals.forEach(v => { if (v > lim.hi || v < lim.lo) withLimBreach++; });
+    }
+  })));
+  const pctOverall = withLimCount > 0 ? ((withLimBreach/withLimCount)*100).toFixed(1) : '—';
+
+  let html = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center">
+      <div class="chip-pts" style="font-size:11px;padding:6px 14px">📍 ${totalPts} điểm đo</div>
+      <div class="chip-pts" style="font-size:11px;padding:6px 14px;background:rgba(247,119,79,.1);border-color:rgba(247,119,79,.3);color:#f7774f">
+        ⚠️ ${withLimBreach}/${withLimCount} lệch ngưỡng (${pctOverall}%)
+      </div>
+      <div class="chip-pts" style="font-size:11px;padding:6px 14px;color:var(--muted)">📅 ${dateLabel}</div>
+    </div>`;
+
+  let tableRows = '';
+  TAB_GROUPS.forEach(g => {
+    let hasData = false;
+    let groupRows = '';
+    g.sections.forEach(sec => {
+      sec.ps.forEach(p => {
+        const series = getSeries(sec.s, p, g.d);
+        const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+        if (!vals.length) return;
+        hasData = true;
+        const mean  = vals.reduce((a,b)=>a+b,0)/vals.length;
+        const std   = Math.sqrt(vals.reduce((a,b)=>a+(b-mean)**2,0)/vals.length);
+        const lim   = getLimit(sec.s, p);
+        let bc=0, ac=0, blc=0;
+        if (lim) vals.forEach(v=>{ if(v>lim.hi){bc++;ac++;} else if(v<lim.lo){bc++;blc++;} });
+        const pctTotal = lim ? ((bc/vals.length)*100).toFixed(1)  : null;
+        const pctAbove = lim ? ((ac/vals.length)*100).toFixed(1)  : null;
+        const pctBelow = lim ? ((blc/vals.length)*100).toFixed(1) : null;
+        const limCell = lim
+          ? `${lim.lo} – ${lim.hi}`
+          : `<span class="no-lim">—</span>`;
+        const avgCell = `${mean.toFixed(2)} <span style="color:var(--muted)">± ${std.toFixed(2)}</span>`;
+        let pctCell;
+        if (!lim) {
+          pctCell = `<span class="no-lim">—</span>`;
+        } else if (bc === 0) {
+          pctCell = `<span class="sum-ok">✓ Đạt chuẩn</span>`;
+        } else {
+          pctCell = `<span class="sum-breach">⚠️ ${pctTotal}%</span><br>
+            <span style="font-size:10.5px;color:#f7774f">▲ ${pctAbove}%</span>
+            <span style="font-size:10.5px;color:#f7c34f;margin-left:8px">▼ ${pctBelow}%</span>`;
+        }
+        const paramLabel = (g.tab==='mia'||g.tab==='matri') ? sec.s : `${sec.s} — ${p}`;
+        groupRows += `<tr data-group="${g.label}">
+          <td>${paramLabel}</td>
+          <td style="white-space:nowrap">${limCell}</td>
+          <td style="white-space:nowrap">${avgCell}</td>
+          <td>${pctCell}</td>
+          <td style="color:var(--muted);text-align:right">${vals.length}</td>
+        </tr>`;
+      });
+    });
+    if (hasData) {
+      tableRows += `<tr class="group-row"><td colspan="5">
+        <span class="dot" style="background:${g.color};display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle"></span>
+        ${g.label}
+      </td></tr>`;
+      tableRows += groupRows;
+    }
+  });
+
+  html += `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:13px;font-weight:700;color:#fff">📋 Bảng tổng hợp thông số</div>
+      <button class="btn-export" onclick="exportTableExcel()">⬇ Xuất CSV / Excel</button>
+    </div>
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:20px">
+      <table class="sum-table">
+        <thead><tr>
+          <th>Thông số</th>
+          <th>Ngưỡng (dưới – trên)</th>
+          <th>Trung bình ± σ</th>
+          <th>% Lệch ngưỡng</th>
+          <th style="text-align:right">n</th>
+        </tr></thead>
+        <tbody id="sum-table-body">${tableRows}</tbody>
+      </table>
+    </div>`;
+
+  TAB_GROUPS.forEach((g, gi) => {
+    let gBreach = 0, gTotal = 0, gWithLim = 0;
+    g.sections.forEach(sec => sec.ps.forEach(p => {
+      const vals = getSeries(sec.s, p, g.d).filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+      gTotal += vals.length;
+      const lim = getLimit(sec.s, p);
+      if (lim) {
+        gWithLim += vals.length;
+        vals.forEach(v => { if (v > lim.hi || v < lim.lo) gBreach++; });
+      }
+    }));
+    const gPct = gWithLim > 0 ? ((gBreach/gWithLim)*100).toFixed(1) : null;
+    const gBadge = gBreach > 0
+      ? `<span style="font-size:10px;color:#f7774f;background:rgba(247,119,79,.15);border:1px solid rgba(247,119,79,.3);padding:2px 8px;border-radius:10px;margin-left:8px">⚠️ ${gBreach} lệch (${gPct}%)</span>`
+      : (gWithLim > 0 ? `<span style="font-size:10px;color:#4fc9a4;background:rgba(79,201,164,.1);border:1px solid rgba(79,201,164,.25);padding:2px 8px;border-radius:10px;margin-left:8px">✓ Đạt chuẩn</span>` : '');
+
+    html += `
+    <div class="ov-group" id="ovg_${gi}">
+      <div class="ov-group-header" onclick="toggleOvGroup(${gi})" style="border-left-color:${g.color}">
+        <div style="display:flex;align-items:center;gap:0">
+          <span class="dot" style="background:${g.color};margin-right:10px"></span>
+          <span style="font-size:13px;font-weight:700;color:#fff">${g.label}</span>
+          ${gBadge}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:10px;color:var(--muted)">${gTotal} điểm</span>
+          <span class="ov-chevron" id="chev_${gi}">▼</span>
+        </div>
+      </div>
+      <div class="ov-group-body" id="ovbody_${gi}">`;
+
+    const isFlat = g.tab === 'mia' || g.tab === 'matri';
+    if (isFlat) {
+      html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px">`;
+      g.sections.forEach(sec => {
+        sec.ps.forEach(p => {
+          const series = getSeries(sec.s, p, g.d);
+          const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+          if (!vals.length) return;
+          const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+          const lim = getLimit(sec.s, p);
+          let bc = 0;
+          if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
+          const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
+          const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
+          const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
+          const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
+          html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:9px 12px;min-width:110px;flex:1 1 110px;cursor:pointer"
+            onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
+            <div style="font-size:9.5px;color:var(--muted);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${sec.s}</div>
+            <div style="font-size:17px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
+            ${lim ? `<div style="font-size:9px;color:var(--muted);margin-top:2px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9px;color:#444;margin-top:2px">— không ngưỡng</div>'}
+            ${lim && bc > 0 ? `<div style="font-size:9px;color:#f7774f;margin-top:1px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
+            ${lim && bc === 0 ? `<div style="font-size:9px;color:#4fc9a4;margin-top:1px">✓ ${vals.length}đ</div>` : ''}
+            ${!lim ? `<div style="font-size:9px;color:var(--muted);margin-top:1px">n=${vals.length}</div>` : ''}
+          </div>`;
+        });
+      });
+      html += `</div>`;
+    } else {
+      g.sections.forEach(sec => {
+        html += `<div style="font-size:11px;color:var(--muted);font-weight:600;margin:10px 0 6px;letter-spacing:.3px">${sec.s}</div>`;
+        html += `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">`;
+        sec.ps.forEach(p => {
+          const series = getSeries(sec.s, p, g.d);
+          const vals = series.filter(pt => pt.v !== null && !isNaN(pt.v)).map(pt => pt.v);
+          if (!vals.length) return;
+          const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+          const lim = getLimit(sec.s, p);
+          let bc = 0;
+          if (lim) vals.forEach(v => { if (v > lim.hi || v < lim.lo) bc++; });
+          const inRange = lim ? (mean >= lim.lo && mean <= lim.hi) : null;
+          const pct = (lim && vals.length > 0) ? ((bc/vals.length)*100).toFixed(1) : null;
+          const valColor = inRange === false ? '#f7774f' : inRange === true ? '#4fc9a4' : '#e4e6f0';
+          const cardBorder = inRange === false ? 'rgba(247,119,79,.4)' : inRange === true ? 'rgba(79,201,164,.2)' : 'var(--border)';
+          html += `<div style="background:var(--surface2);border:1px solid ${cardBorder};border-radius:10px;padding:10px 14px;min-width:130px;flex:1;max-width:200px;cursor:pointer"
+            onclick="showTab('${g.tab}')" title="Nhấn để xem biểu đồ chi tiết">
+            <div style="font-size:10px;color:var(--muted);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p}</div>
+            <div style="font-size:18px;font-weight:800;color:${valColor};line-height:1.1">${mean.toFixed(2)}</div>
+            ${lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:3px">↕ ${lim.lo}–${lim.hi}</div>` : '<div style="font-size:9.5px;color:#444;margin-top:3px">— không ngưỡng</div>'}
+            ${lim && bc > 0 ? `<div style="font-size:9.5px;color:#f7774f;margin-top:2px">⚠️ ${bc}/${vals.length} (${pct}%)</div>` : ''}
+            ${lim && bc === 0 ? `<div style="font-size:9.5px;color:#4fc9a4;margin-top:2px">✓ ${vals.length} điểm</div>` : ''}
+            ${!lim ? `<div style="font-size:9.5px;color:var(--muted);margin-top:2px">n = ${vals.length}</div>` : ''}
+          </div>`;
+        });
+        html += `</div>`;
+      });
+    }
+
+    html += `</div></div>`;
+  });
+
+  mc.innerHTML = html;
+}
+
+function toggleOvGroup(i) {
+  const body  = document.getElementById('ovbody_' + i);
+  const chev  = document.getElementById('chev_' + i);
+  const open  = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  chev.textContent   = open ? '▶' : '▼';
+}
+
+// ============================================================
+// RENDER TABS
+// ============================================================
+function renderSingle(section, dataset, params, color) {
+  const mc = document.getElementById('mainContent');
+  const specs = [];
+  let html = `<div class="section-header"><span class="dot" style="background:${color}"></span><span class="section-title">${section}</span></div>${legendBar()}<div class="chart-grid">`;
+  params.forEach(p=>{
+    const id=`s_${section.replace(/ /g,'_')}_${p}`;
+    html += cardHtml(id, `${section} – ${p}`, section, p, dataset);
+    specs.push({id,p});
+  });
+  html += '</div>';
+  mc.innerHTML = html;
+  specs.forEach(sp => renderCardChart(sp.id, section, sp.p, dataset));
+}
+
+function renderMulti(sections, title, color) {
+  const mc = document.getElementById('mainContent');
+  let html = `<div class="section-header"><span class="dot" style="background:${color}"></span><span class="section-title">${title}</span></div>${legendBar()}`;
+  const all = [];
+  sections.forEach(sec=>{
+    html+=`<div class="section-group"><div class="sub-label">${sec.s}</div><div class="chart-grid">`;
+    sec.ps.forEach(p=>{
+      const id=`m_${sec.s.replace(/ /g,'_')}_${p}`;
+      html += cardHtml(id, `${sec.s} – ${p}`, sec.s, p, sec.d);
+      all.push({id, sec:sec.s, p, d:sec.d});
+    });
+    html+='</div></div>';
+  });
+  mc.innerHTML=html;
+  all.forEach(sp => renderCardChart(sp.id, sp.sec, sp.p, sp.d));
+}
+
+function renderFlat(dataset, title, color, params) {
+  const mc = document.getElementById('mainContent');
+  const specs = [];
+  let html = `<div class="section-header"><span class="dot" style="background:${color}"></span><span class="section-title">${title}</span></div>${legendBar()}<div class="chart-grid">`;
+  params.forEach(p => {
+    const id = `flat_${dataset}_${p.replace(/ /g,'_')}`;
+    html += cardHtml(id, `${title} – ${p}`, p, p, dataset);
+    specs.push({id, p});
+  });
+  html += '</div>';
+  mc.innerHTML = html;
+  specs.forEach(sp => {
+    const series = getSeries(sp.p, sp.p, dataset);
+    makeChart(sp.id, [{label: sp.p, series}], sp.p, sp.p);
+  });
+}
+
+function showTab(tab) {
+  currentTab = tab;
+  const ids=['overview','hoa1','hoa2','hoa3','hoa4','nau1','nau2','nau3','mia','matri'];
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',ids[i]===tab));
+  renderTab();
+}
+
+function renderTab() {
+  const mc = document.getElementById('mainContent');
+  mc.innerHTML='';
+  Object.values(charts).forEach(c=>c.destroy());
+  charts = {};
+  if (currentTab==='overview') renderOverview();
+  else if (currentTab==='hoa1') renderSingle('Syrup sau lắng nổi','hoa',['Ap','Bx','Pol','pH','Độ màu'],'#4f8ef7');
+  else if (currentTab==='hoa2') renderSingle('Syrup trước lắng nổi','hoa',['Bx','pH','Độ màu'],'#4fc9a4');
+  else if (currentTab==='hoa3') renderSingle('Nước chè trong 2','hoa',['Ap','Bx','Pol','pH','Độ màu','Độ đục (IU)'],'#f7c34f');
+  else if (currentTab==='hoa4') renderSingle('Sirô thô sau bốc hơi','hoa',['Ap','Bx','Pol','pH','Độ màu'],'#b44ff7');
+  else if (currentTab==='nau1') renderMulti([
+    {s:'Đường non A',ps:['Ap','Bx','Pol'],d:'nau'},
+    {s:'Đường non B',ps:['Ap','Bx','Pol'],d:'nau'},
+    {s:'Đường non C',ps:['Ap','Bx','Pol'],d:'nau'},
+  ],'Đường non A / B / C','#f7774f');
+  else if (currentTab==='nau2') renderMulti([
+    {s:'Đường B',ps:['Ap','Bx','Pol'],d:'nau'},
+    {s:'Đường C',ps:['Ap','Bx','Pol'],d:'nau'},
+  ],'Đường B & C','#4fc9a4');
+  else if (currentTab==='nau3') renderMulti([
+    {s:'Mật nguyên A',ps:['Ap','Bx','Pol'],d:'nau'},
+    {s:'Mật loãng A',ps:['Ap','Bx','Pol'],d:'nau'},
+    {s:'Mật B',ps:['Ap','Bx','Pol'],d:'nau'},
+    {s:'Hồi dung B',ps:['Ap','Bx','Pol','Độ màu'],d:'nau'},
+    {s:'Hồi dung C',ps:['Ap','Bx','Pol','Độ màu'],d:'nau'},
+  ],'Mật & Hồi dung','#f7c34f');
+  else if (currentTab==='mia') renderFlat('mia','Mía – Nước mía','#4f8ef7',[
+    'Pol bã','Ẩm bã','Xơ mía','pH gia vôi NM HH','pH NM trung hòa',
+    'Ap NM HH','Bx NM HH','Pol NM HH',
+    'Ap NM đầu','Bx NM đầu','Pol NM đầu',
+    'Ap NM cuối','Bx NM cuối','Pol NM cuối','P2O5'
+  ]);
+  else if (currentTab==='matri') renderFlat('matri','Mật rỉ – Bùn thô','#f7774f',[
+    'Pol bùn','Độ ẩm bùn',
+    'Ap mật cuối','Bx mật cuối','Pol mật cuối','RS mật cuối',
+    'Ap mật rỉ','Bx mật rỉ','Bx1 mật rỉ','Pol mật rỉ'
+  ]);
+  updatePointCount();
+}
+
+function renderAll() { renderTab(); }
+try { renderTab(); } catch(e) { console.error('[Dashboard] renderTab error:', e); }
+</script>
+</body>
+</html>
