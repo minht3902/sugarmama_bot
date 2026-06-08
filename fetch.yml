@@ -1,0 +1,115 @@
+name: Fetch & Update Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: "Từ ngày (YYYY-MM-DD) — để trống = chạy mặc định từ đầu vụ"
+        required: false
+        default: ""
+      to_date:
+        description: "Đến ngày (YYYY-MM-DD) — để trống = chạy mặc định đến hết tháng"
+        required: false
+        default: ""
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pandas requests openpyxl
+
+      # ── Kiểm tra dashboard_template.html có mặt trước khi fetch ──────────
+      # Nếu file chưa có trong repo (chưa commit lần đầu), workflow sẽ fail
+      # rõ ràng với thông báo cụ thể thay vì âm thầm dùng template cũ/sai.
+      - name: Verify dashboard_template.html exists
+        run: |
+          if [ ! -f "dashboard_template.html" ]; then
+            echo "❌ dashboard_template.html không tìm thấy trong repo."
+            echo "   Hãy commit file này lên repo trước khi chạy workflow."
+            exit 1
+          fi
+          echo "✅ dashboard_template.html tìm thấy ($(wc -c < dashboard_template.html) bytes)"
+
+      - name: Run fetcher
+        env:
+          DIGIFACTORY_USERNAME: ${{ secrets.DIGIFACTORY_USERNAME }}
+          DIGIFACTORY_PASSWORD: ${{ secrets.DIGIFACTORY_PASSWORD }}
+          BOT_TOKEN:            ${{ secrets.BOT_TOKEN }}
+          ALLOWED_CHAT_ID:      ${{ secrets.ALLOWED_CHAT_ID }}
+          FETCH_FROM_DATE:      ${{ github.event.inputs.from_date }}
+          FETCH_TO_DATE:        ${{ github.event.inputs.to_date }}
+        run: python fetcher.py
+
+      # ── Verify dashboard output hợp lệ ───────────────────────────────────
+      # Đảm bảo file HTML được sinh ra thực sự dùng template mới
+      # (không còn f-string cũ) bằng cách kiểm tra placeholder đã được replace.
+      - name: Verify dashboard output
+        run: |
+          DASHBOARDS=$(ls dashboard_*.html 2>/dev/null | wc -l)
+          if [ "$DASHBOARDS" -eq 0 ]; then
+            echo "❌ Không tìm thấy dashboard_*.html sau khi chạy fetcher.py"
+            exit 1
+          fi
+          echo "✅ Tìm thấy $DASHBOARDS file dashboard"
+
+          # Kiểm tra không còn placeholder chưa được replace
+          UNRESOLVED=0
+          for f in dashboard_*.html; do
+            # Bỏ qua file template gốc — nó luôn chứa placeholder, đó là đúng
+            [ "$f" = "dashboard_template.html" ] && continue
+            for placeholder in "__RAW_JSON__" "__LIMITS_JSON__" "__FROM_ISO__" \
+                               "__ACTUAL_LAST__" "__MONTH_LABEL__" "__CACHE_FILE__" \
+                               "__GITHUB_OWNER__" "__GITHUB_REPO__"; do
+              if grep -q "$placeholder" "$f"; then
+                echo "❌ $f vẫn còn placeholder chưa replace: $placeholder"
+                UNRESOLVED=1
+              fi
+            done
+          done
+          if [ "$UNRESOLVED" -eq 1 ]; then
+            echo "   fetcher.py chưa được cập nhật sang phiên bản mới hoặc template bị lỗi."
+            exit 1
+          fi
+          echo "✅ Tất cả placeholder đã được inject đúng"
+
+          # Kiểm tra không còn {{ }} escape hell của f-string cũ
+          for f in dashboard_*.html; do
+            COUNT=$(grep -c "{{" "$f" 2>/dev/null || true)
+            if [ "$COUNT" -gt 0 ]; then
+              echo "⚠️  $f chứa $COUNT cặp {{ }} — có thể đang dùng fetcher cũ"
+            fi
+          done
+
+      - name: Commit & push cache + dashboard
+        timeout-minutes: 10
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add cache*.json dashboard*.html
+
+          git diff --cached --quiet && echo "Nothing to commit" && exit 0
+
+          git commit -m "chore: update cache & dashboard [$(date -u '+%Y-%m-%d %H:%M UTC')]"
+
+          # Retry git push tối đa 3 lần với exponential backoff
+          for i in 1 2 3; do
+            git push && break
+            echo "Push attempt $i failed, retrying..."
+            sleep $((i * 15))
+            git pull --rebase origin main
+          done
