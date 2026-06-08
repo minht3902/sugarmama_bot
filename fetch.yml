@@ -59,21 +59,21 @@ jobs:
       # (không còn f-string cũ) bằng cách kiểm tra placeholder đã được replace.
       - name: Verify dashboard output
         run: |
-          DASHBOARDS=$(ls dashboard_*.html 2>/dev/null | wc -l)
-          if [ "$DASHBOARDS" -eq 0 ]; then
+          # Chỉ lấy các file dashboard thực sự — loại trừ template gốc bằng find
+          GENERATED=$(find . -maxdepth 1 -name "dashboard_*.html"                        ! -name "dashboard_template.html" 2>/dev/null)
+
+          COUNT=$(echo "$GENERATED" | grep -c ".html" 2>/dev/null || echo 0)
+          if [ "$COUNT" -eq 0 ]; then
             echo "❌ Không tìm thấy dashboard_*.html sau khi chạy fetcher.py"
             exit 1
           fi
-          echo "✅ Tìm thấy $DASHBOARDS file dashboard"
+          echo "✅ Tìm thấy $COUNT file dashboard được sinh ra"
 
           # Kiểm tra không còn placeholder chưa được replace
           UNRESOLVED=0
-          for f in dashboard_*.html; do
-            # Bỏ qua file template gốc — nó luôn chứa placeholder, đó là đúng
-            [ "$f" = "dashboard_template.html" ] && continue
-            for placeholder in "__RAW_JSON__" "__LIMITS_JSON__" "__FROM_ISO__" \
-                               "__ACTUAL_LAST__" "__MONTH_LABEL__" "__CACHE_FILE__" \
-                               "__GITHUB_OWNER__" "__GITHUB_REPO__"; do
+          PLACEHOLDERS="__RAW_JSON__ __LIMITS_JSON__ __FROM_ISO__ __ACTUAL_LAST__ __MONTH_LABEL__ __CACHE_FILE__ __GITHUB_OWNER__ __GITHUB_REPO__"
+          for f in $GENERATED; do
+            for placeholder in $PLACEHOLDERS; do
               if grep -q "$placeholder" "$f"; then
                 echo "❌ $f vẫn còn placeholder chưa replace: $placeholder"
                 UNRESOLVED=1
@@ -85,14 +85,6 @@ jobs:
             exit 1
           fi
           echo "✅ Tất cả placeholder đã được inject đúng"
-
-          # Kiểm tra không còn {{ }} escape hell của f-string cũ
-          for f in dashboard_*.html; do
-            COUNT=$(grep -c "{{" "$f" 2>/dev/null || true)
-            if [ "$COUNT" -gt 0 ]; then
-              echo "⚠️  $f chứa $COUNT cặp {{ }} — có thể đang dùng fetcher cũ"
-            fi
-          done
 
       - name: Commit & push cache + dashboard
         timeout-minutes: 10
