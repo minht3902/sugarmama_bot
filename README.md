@@ -29,46 +29,7 @@
 
 ## Kiến trúc hệ thống / Architecture
 
-```
-┌─────────────────────┐        mỗi 5 phút / every 5 min
-│   fetcher_loop.py   │ ──────────────────────────────────────────┐
-│   (JustRunMyApp)    │                                           │
-└─────────────────────┘                                           ▼
-                                                      ┌─────────────────────┐
-                                                      │     fetcher.py      │
-                                                      │  Thu thập dữ liệu   │
-                                                      │  Digifactory API    │
-                                                      └──────────┬──────────┘
-                                                                 │
-                                          ┌──────────────────────┼──────────────────────┐
-                                          ▼                      ▼                      ▼
-                                  cache_X_Y.json        dashboard_X_Y.html    (push via Git API)
-                                          │                      │
-                                          └──────────────────────┘
-                                                      │
-                                             GitHub repo (public)
-                                          sugarmama_bot/main
-                                                      │
-                              ┌───────────────────────┼────────────────────────┐
-                              ▼                       ▼                        ▼
-                       /indicator              /summary               /dashboard
-                       /status                commands               (gửi file HTML /
-                                                                    send HTML file)
-                              └───────────────────────┴────────────────────────┘
-                                                      │
-                                             ┌────────────────┐
-                                             │    bot.py      │
-                                             │ (JustRunMyApp) │
-                                             └────────────────┘
-                                                      │
-                                             Telegram Bot API
-                                                      │
-                                                   Users
-
-─────────────────────────── Admin only ──────────────────────────
-/newcache  ──► GitHub Actions (fetch.yml) ──► fetcher.py ──► push cache + dashboard
-/update    ──► GitHub Actions (fetch.yml) ──► fetcher.py ──► push cache + dashboard
-```
+![SugarMama Pipeline Architecture](pipeline_architecture.png)
 
 **VI:** Toàn bộ hệ thống không cần server riêng — chạy hoàn toàn trên JustRunMyApp (free tier) và GitHub (free public repo).
 
